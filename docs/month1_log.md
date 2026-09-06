@@ -1188,3 +1188,170 @@ since it's the last of the three originally-flagged issues (acquisition
 source, longitude convention, containment specificity) still open, and
 now has a concrete, real worked example (this pair) to calibrate against
 instead of a hypothetical one.
+
+---
+
+## Slice 8: Calibrate the size-ratio specificity penalty against real data
+
+This pass changed only `ml/data/spatial_alignment.py` and
+`tests/test_spatial_alignment.py`. `ml/data/pds_acquisition.py`, the
+longitude standardization, and `ml/utils/splits.py` were not touched.
+
+### Step 1 — characterize the real distribution first
+
+Pulled `size_ratio` (`max(area)/min(area)`) and `overlap_coefficient` for
+all 1600 real HAMO-cycle-1 candidate pairs already on disk (no
+re-download — reused the same manifests as Slice 7).
+
+**Size-ratio distribution, all 1600 candidates:**
+
+| range | count |
+|---|---|
+| [1, 2) | 260 |
+| [2, 5) | 1340 |
+| [5, 10) | 0 |
+| [10, 20) | 0 |
+| [20, 100000) | 0 |
+
+min=1.883, median=2.234, max=4.042. **Every single real candidate pair
+falls between 1.88x and 4.04x.** None come anywhere close to the 10x/50x+
+regime the original penalty comment was written to guard against.
+
+**Overlap-coefficient distribution, same 1600:** only 6 pairs have any
+nonzero containment at all; all 6 exceed 0.10, all 6 exceed 0.20, and
+1 exceeds 0.30. Listing all 6 (sorted by containment):
+
+| FC product | VIR product | dt (h) | overlap_coefficient | size_ratio |
+|---|---|---|---|---|
+| 0007112 | VIR_VIS_1B_1_370617178 | 0.10 | 0.305 | 1.93 |
+| 0007111 | VIR_VIS_1B_1_370617178 | 0.10 | 0.293 | 1.93 |
+| 0007110 | VIR_VIS_1B_1_370617178 | 0.10 | 0.282 | 1.93 |
+| 0007109 | VIR_VIS_1B_1_370617178 | 0.11 | 0.273 | 1.93 |
+| 0007108 | VIR_VIS_1B_1_370617178 | 0.11 | 0.264 | 1.93 |
+| 0007107 | VIR_VIS_1B_1_370617178 | 0.11 | 0.257 | 1.93 |
+
+**All 6 are the same physical event**: 6 consecutive FC frames from one
+nadir track (product IDs `0007107`-`0007112`, adjacent) sweeping through
+the same VIR spectrum's footprint, all ~6-7 minutes apart, all at
+identically ~1.93x size ratio (same VIR spectrum, nearly-identical FC
+frame size). This is not "one VIR swath trivially containing many
+unrelated small frames" (which would show up as many *different* VIR
+products all near the same, low containment) — it's one coherent,
+physically real scanning-overlap event, with containment naturally
+varying frame-to-frame as the exact footprint shifts. No other size-ratio
+regime or containment cluster exists in this real dataset to characterize
+further.
+
+### Step 2 — does the original concern actually apply at 1.93x?
+
+The original comment (Slice 4/6) worried about "a single giant image
+footprint trivially containing dozens of unrelated small spectra" —
+i.e., a scenario built for *large* size mismatches (10x, 50x+). The real
+distribution above shows this dataset never produces anything but a
+1.88x-4.04x mismatch, because FC frames and VIR scans at HAMO altitude
+are simply fixed, comparably-sized ground patches by instrument design —
+not a symptom of an imprecise or non-specific match. **The original
+linear-from-1x penalty was discounting every single real pair in this
+dataset for exhibiting completely normal, expected instrument geometry**,
+not for any real ambiguity. The concern is real (kept, not deleted) — it
+just doesn't apply anywhere in the range real Dawn FC/VIR HAMO pairs
+actually occupy.
+
+### Step 3 — the fix
+
+`compute_size_ratio_penalty(size_ratio)`, replacing the inline
+`1.0 / size_ratio`:
+
+```
+penalty = 1.0                          if size_ratio <= 5.0
+penalty = 5.0 / size_ratio             otherwise
+```
+
+`5.0` (`SIZE_RATIO_NO_PENALTY_THRESHOLD`) was chosen because it sits
+comfortably above the observed real max (4.04x) — not fitted exactly to
+it, and matching one of the two round thresholds this task itself
+suggested considering (5x or 10x). Continuous at the boundary
+(`5.0/5.0 = 1.0`), decaying gracefully toward 0 for genuinely extreme
+mismatches beyond it, so the underlying concern still fires where it
+would actually matter (e.g. a full-disk mosaic accidentally scored
+against a narrow VIR scan) — it just no longer fires across the entire
+real, normal range this dataset exhibits.
+
+Full reasoning (this section, condensed) is written directly into
+`compute_footprint_overlap()`'s docstring, referencing the real 1.93x /
+0.517-vs-1.0 penalty / 0.157-vs-0.305 confidence numbers, so this isn't a
+mystery constant later.
+
+### Step 4 — regression tests
+
+Added to `tests/test_spatial_alignment.py`:
+- `test_size_ratio_penalty_is_unity_within_the_real_observed_range` —
+  1.0, 1.88, 2.23, 4.04, and the 5.0 threshold itself all get penalty 1.0.
+- `test_size_ratio_penalty_decays_beyond_the_threshold` — 10x → 0.5,
+  50x → 0.1, confirming the concern still applies outside the real range.
+- `test_calibration_pair_confidence_lands_near_0_305_as_a_consequence` —
+  the real FC `0007112` / VIR `VIR_VIS_1B_1_370617178` pair: asserts
+  `size_ratio≈1.93`, `overlap_coefficient≈0.305`, `penalty==1.0`, and
+  **`confidence≈0.3046`** (computed via the real function, not asserted
+  as a round target — the exact value is a consequence of the threshold
+  choice, reported honestly including its being narrowly above 0.30 by
+  design margin, not tuned to it).
+
+7/7 new + existing tests: 33/33 total, passing.
+
+### Step 5 — re-run on all 1600 real candidate pairs
+
+Command:
+```
+python -m ml.data.spatial_alignment -v
+```
+Result:
+```
+Alignment: 1600 FC x 24 VIR candidates fell inside the 24.0h time window; 1600 pairs had computable overlap; 1/1600 survived confidence >= 0.30
+Done: 200 FC images, 100 VIR spectra considered; 1 pairs survived confidence >= 0.30
+```
+
+**1 real survivor** — FC `0007112` / VIR `VIR_VIS_1B_1_370617178`,
+confidence 0.30461421..., exactly matching the calibration prediction.
+Spot-checked the written row in `datasets/metadata/sample_metadata.csv`:
+full provenance present (both dataset IDs, both product IDs, both
+instrument names, mission), real overlap region (lat -17.77 to -7.69,
+lon 82.84 to 88.34), real time delta (358.6 seconds ≈ 6 minutes), label
+correctly still `unlabeled`/`pending` (labeling is a later step). The
+cropped region PNG (`datasets/processed/0007112__VIR_VIS_1B_1_370617178.png`)
+was written and opens as a real 300×551 grayscale image, not empty or
+corrupt.
+
+**Checked for spurious survivors, not just the count**: the other 5
+near-miss pairs (containment 0.257-0.293, all just under 0.30) are the
+same physically-coherent adjacent-frame cluster described in Step 1 —
+plausible near-misses of the same real event, not unrelated noise that
+the new formula let slip through. No pair outside this one 6-pair cluster
+has any nonzero containment at all, so there was no opportunity for a
+wildly-mismatched or spurious pair to incorrectly survive in this batch.
+
+### Go/no-go — sample volume for proceeding to labeling (not the full Month 1 close-out)
+
+**1 real, spatially-verified, plausible pair.** All three originally
+flagged issues (acquisition source, longitude convention, size-ratio
+penalty) are now fixed and verified against real data — the pipeline
+itself is validated: given a genuine correspondence, it now correctly
+finds and scores it (0.305 real containment, correctly near-zero
+discount, crossing the threshold); given non-correspondences, it
+correctly reports zero.
+
+**But N=1 is not remotely enough sample volume to proceed to labeling
+and a 3-way model comparison.** A single sample cannot populate even one
+class, let alone support a train/val/test split or any class-balance
+assessment — Part B/C of the labeling pass would have nothing meaningful
+to do with N=1 beyond labeling that one sample. This is not a pipeline
+problem anymore, though: this batch only covered 200 FC frames (of 5080
+in the verified `hamo_cycle1` window) and 100 VIR spectra (of ~80 primary
+cubes per channel in the same window) — a small fraction of even one
+week's mapping cycle, let alone the full ~74-day HAMO phase or the LAMO
+phase. **The clear next step is a larger acquisition pull within the
+already-verified HAMO/LAMO windows** (more FC frames, more VIR spectra,
+possibly more cycles) using the now-fully-validated alignment pipeline
+unchanged — not further debugging of the alignment math, which has now
+been checked and calibrated against real data three times over (Slices
+6, 7, 8).

@@ -382,6 +382,27 @@ def _time_proximity_factor(t1: Optional[str], t2: Optional[str], max_time_delta_
     return factor, delta_seconds
 
 
+# Ratio (max_area/min_area) up to which a size mismatch between an FC
+# footprint and a VIR footprint gets NO specificity discount at all — see
+# compute_footprint_overlap()'s docstring for the real-data evidence this
+# was calibrated against (all 1600 real HAMO-cycle-1 candidate pairs sit
+# in the 1.88x-4.04x range; 5.0 sits comfortably above that, not fitted
+# to it exactly).
+SIZE_RATIO_NO_PENALTY_THRESHOLD = 5.0
+
+
+def compute_size_ratio_penalty(size_ratio: float) -> float:
+    """1.0 for size_ratio <= SIZE_RATIO_NO_PENALTY_THRESHOLD (real Dawn
+    FC/VIR HAMO pairs all fall here — no specificity concern applies),
+    decaying as threshold/size_ratio beyond it (continuous at the
+    boundary, approaching 0 for genuinely extreme mismatches)."""
+    if size_ratio <= 0:
+        return 0.0
+    if size_ratio <= SIZE_RATIO_NO_PENALTY_THRESHOLD:
+        return 1.0
+    return SIZE_RATIO_NO_PENALTY_THRESHOLD / size_ratio
+
+
 def compute_footprint_overlap(
     image_geometry: Optional[ProductGeometry],
     spectrum_geometry: Optional[ProductGeometry],
@@ -407,17 +428,40 @@ def compute_footprint_overlap(
     single giant image footprint could then trivially "fully contain",
     and score maximally against, dozens of unrelated small spectra
     anywhere within it — that's not a spatially *specific* match either.
-    `size_ratio_penalty = min(area)/max(area)` (in (0, 1]) explicitly
-    discounts confidence as the size mismatch grows, so a same-sized,
-    fully-overlapping pair scores near 1.0, while a fully-contained but
-    wildly size-mismatched pair scores low, without IoU's harsher
-    union-dominated penalty for containment alone.
+    A `size_ratio_penalty` in (0, 1] discounts confidence as the size
+    mismatch grows, so a same-sized, fully-overlapping pair scores near
+    1.0, while a fully-contained but wildly size-mismatched pair scores
+    low, without IoU's harsher union-dominated penalty for containment
+    alone.
 
-    NOTE: the size-ratio penalty's exact strength (here, a plain linear
-    multiply — not softened) is a placeholder, not a validated choice —
-    there is no real surviving pair yet to look at the actual image/
-    spectrum footprint-area-ratio distribution and calibrate against
-    (see docs/month1_log.md). Once real pairs exist, re-examine this.
+    CALIBRATED against real data (Month 1, Slice 8) — this was a plain
+    linear `min(area)/max(area)` placeholder until real candidate pairs
+    existed to check it against. Characterized the real distribution
+    across all 1600 real HAMO-cycle-1 FC/VIR candidate pairs (see
+    docs/month1_log.md for the full table): every single one has a
+    footprint-area ratio between 1.88x and 4.04x (median 2.23x) — nowhere
+    near the 10x-50x+ "huge swath trivially contains a tiny frame"
+    scenario the original placeholder was guarding against. That's not
+    noise or a small sample: it reflects that FC and VIR footprints at
+    HAMO altitude are simply fixed, comparably-sized ground patches by
+    instrument design — a ~2-4x difference is what a *genuine* FC/VIR
+    HAMO pair looks like, not a symptom of a non-specific match. Applying
+    a from-1x linear penalty was discounting every real pair in this
+    dataset for exhibiting completely normal instrument geometry.
+
+    Fix: `size_ratio_penalty = 1.0` for ratios up to 5x (comfortably above
+    the observed real max of 4.04x, so the fix doesn't just barely cover
+    what happened to be measured), decaying as `5.0/ratio` beyond that —
+    continuous at the 5x boundary, and only starts discounting once a
+    pair is *outside* the range real Dawn FC/VIR HAMO pairs actually
+    exhibit. The real calibration pair from Slice 7 (FC 0007112 / VIR
+    VIR_VIS_1B_1_370617178, size_ratio=1.93, overlap_coefficient=0.305,
+    time_factor=0.996) now gets size_ratio_penalty=1.0 (no discount) as a
+    *consequence* of being within the real, typical range — not a target
+    tuned to reach any particular confidence. See
+    tests/test_spatial_alignment.py for the regression test built from
+    this exact pair, and docs/month1_log.md, Slice 8, for the full
+    distribution table and re-run survivor results.
 
     Time proximity remains a secondary signal only: it can discount an
     overlapping pair down to half its spatial score, never invent
@@ -434,7 +478,7 @@ def compute_footprint_overlap(
     if details["overlap_coefficient"] == 0.0:
         return 0.0
 
-    size_ratio_penalty = 1.0 / details["size_ratio"] if details["size_ratio"] > 0 else 0.0
+    size_ratio_penalty = compute_size_ratio_penalty(details["size_ratio"])
     spatial_score = details["overlap_coefficient"] * size_ratio_penalty
 
     time_factor, _delta_seconds = _time_proximity_factor(
