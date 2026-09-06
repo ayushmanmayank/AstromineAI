@@ -144,6 +144,64 @@ class ProductGeometry:
     footprint_source: Optional[str]  # 'bounding_box' | 'reticle_corners_bbox' | None
 
 
+def _standardize_footprint_lon(west_lon: float, east_lon: float, instrument_id: Optional[str]) -> tuple[float, float]:
+    """Convert a product's raw WESTERNMOST_LONGITUDE/EASTERNMOST_LONGITUDE
+    into standard, increasing-eastward (west <= east, modulo a genuine
+    Prime-Meridian wrap) form — instrument-aware, because FC and VIR do
+    NOT share one convention in this archive. Evidence (see
+    docs/month1_log.md, Slice 7, for the full writeup):
+
+    - Real sample, 20/20 each, from actual downloaded HAMO .LBL files:
+      every FC product has WESTERNMOST_LONGITUDE < EASTERNMOST_LONGITUDE
+      (CENTER_LONGITUDE always between); every VIR product has
+      WESTERNMOST_LONGITUDE > EASTERNMOST_LONGITUDE (CENTER_LONGITUDE
+      always between the two, just the other way round). This is a
+      clean, 100%-consistent split by instrument, not noise.
+    - Documentation (DWNVFC2_1B/DOCUMENT/SIS/DAWN_FC_SIS_20131216.HTM):
+      explicitly states "CENTER_LONGITUDE ... Center pixel planetocentric
+      EAST longitude" and "SUB_SPACECRAFT_LONGITUDE ... planetocentric
+      east" for FC — i.e. FC's own SIS explicitly confirms east-increasing,
+      matching the empirical pattern exactly.
+    - VIR's SIS (DWNVVIR_V1B/DOCUMENT/SIS/DAWN_VIR_SIS_V1_8.HTM) states
+      CENTER_LONGITUDE/SUB_SPACECRAFT_LONGITUDE are "planetocentric"
+      (without VIR's doc ever writing the word "east" next to it, unlike
+      FC's) — which, read via the same doc's general definition
+      ("planetocentric... longitudes increase toward the east"), would
+      imply VIR's WESTERNMOST/EASTERNMOST should ALSO be east-increasing.
+      They empirically are not (20/20 real samples). This is a real,
+      unresolved apparent inconsistency in VIR's own documentation/
+      pipeline (not papered over here) — the fix below follows the
+      empirical pattern, which is unambiguous and internally
+      self-consistent (CENTER_LONGITUDE always lands between the two
+      raw values either way), over the ambiguous prose.
+    - A worked real example that motivated this whole fix (FC product
+      0007106 vs VIR product VIR_VIS_1B_1_370617178, ~2h10m apart in a
+      HAMO cycle-1 pair with real latitude overlap): treating VIR's raw
+      values as already-standard (as the previous version of this
+      function did, inferred from too small a sample) inflates VIR's
+      true ~14.86 degree span into a nonsensical, un-inflated-for-FC-only
+      comparison; the deeper problem this surfaced was that FC's OWN
+      ~18.69 degree span was getting inflated to ~341 degrees by
+      wrongly applying a VIR-shaped correction to FC. See
+      tests/test_spatial_alignment.py for the regression test built from
+      this exact pair.
+
+    Returns (west_lon, east_lon) unchanged for FC (and for any unrecognized
+    instrument — logged, not silently guessed at), and swapped for VIR.
+    """
+    instrument = (instrument_id or "").strip().upper()
+    if instrument.startswith("VIR"):
+        return east_lon, west_lon
+    if instrument.startswith("FC"):
+        return west_lon, east_lon
+    logger.warning(
+        "Unrecognized instrument_id %r for longitude standardization — leaving "
+        "WESTERNMOST/EASTERNMOST_LONGITUDE as-is rather than guessing which "
+        "convention applies", instrument_id,
+    )
+    return west_lon, east_lon
+
+
 def load_geometry(label_path: str | Path) -> Optional[ProductGeometry]:
     """Read one PDS3 .LBL file and extract identity/time/footprint fields.
 
@@ -175,9 +233,12 @@ def load_geometry(label_path: str | Path) -> Optional[ProductGeometry]:
     west_lon = _get_float(text, "WESTERNMOST_LONGITUDE")
     east_lon = _get_float(text, "EASTERNMOST_LONGITUDE")
 
+    instrument_id = _get_scalar(text, "INSTRUMENT_ID")
+
     footprint = None
     footprint_source = None
     if None not in (min_lat, max_lat, west_lon, east_lon):
+        west_lon, east_lon = _standardize_footprint_lon(west_lon, east_lon, instrument_id)
         footprint = {
             "min_lat": min_lat, "max_lat": max_lat,
             "west_lon": west_lon, "east_lon": east_lon,
@@ -199,7 +260,7 @@ def load_geometry(label_path: str | Path) -> Optional[ProductGeometry]:
         label_path=str(label_path),
         product_id=_get_scalar(text, "PRODUCT_ID"),
         dataset_id=_get_scalar(text, "DATA_SET_ID"),
-        instrument_id=_get_scalar(text, "INSTRUMENT_ID"),
+        instrument_id=instrument_id,
         instrument_host=_get_scalar(text, "INSTRUMENT_HOST_ID") or _get_scalar(text, "INSTRUMENT_HOST_NAME"),
         mission_name=_get_scalar(text, "MISSION_NAME") or "DAWN",
         target_name=_get_scalar(text, "TARGET_NAME"),
@@ -215,48 +276,6 @@ def load_geometry(label_path: str | Path) -> Optional[ProductGeometry]:
 # --------------------------------------------------------------------------
 
 
-def _lon_to_x(lon: float) -> float:
-    """Transform a native WESTERNMOST/EASTERNMOST_LONGITUDE value into a
-    standard increasing-eastward coordinate `x` in [0, 360).
-
-    IMPORTANT CORRECTNESS NOTE — this dataset's longitude convention:
-    the PDS SIS boilerplate (DWNVVIR_*/DOCUMENT/SIS/DAWN_VIR_SIS_V1_8.HTM)
-    only documents the case "longitude increases toward the east", under
-    which WESTERNMOST_LONGITUDE = min(lon), EASTERNMOST_LONGITUDE =
-    max(lon), "unless it crosses the Prime Meridian". But every real
-    downloaded label in this project has WESTERNMOST_LONGITUDE >
-    EASTERNMOST_LONGITUDE, which under that east-increasing reading would
-    mean *every single one* crosses the Prime Meridian, with footprint
-    spans of ~275-310 degrees. That's not just statistically implausible
-    across an independently-sampled batch — it's geometrically
-    impossible: a spacecraft outside the body can never see more than one
-    hemisphere (<=180 degrees of longitude) at once. Reading these two
-    fields as a WEST-increasing planetographic convention instead (i.e.
-    the footprint's angular extent is `west_lon - east_lon`, wrapping
-    through 0/360 only when east_lon > west_lon) gives spans of
-    ~51-123 degrees for the same real data — comfortably under the
-    180-degree physical limit, and consistent across every sample. That's
-    the convention used here. This was inferred from the real downloaded
-    values plus this hard physical constraint, not confirmed by an
-    explicit "longitude increases toward the west" sentence in the SIS
-    (which doesn't have one) — flagged as a real interpretation, not
-    certain, and worth cross-checking against an actual SPICE/ISIS
-    reprojection (e.g. Claudia crater at 146.0 deg in Claudia
-    Double-Prime) once real surviving pairs exist to check it against.
-
-    Transforming lon -> x = (360 - lon) mod 360 turns this dataset's
-    "west_lon -> east_lon, decreasing/wrapping-through-0" traversal into
-    a standard "x_west -> x_east, increasing/wrapping-through-360"
-    interval, so the rest of the overlap math can use ordinary circular-
-    interval logic.
-    """
-    return (360.0 - (lon % 360.0)) % 360.0
-
-
-def _x_to_lon(x: float) -> float:
-    return _lon_to_x(x)  # the transform is self-inverse
-
-
 def _split_wrapping_interval(lo: float, hi: float) -> list[tuple[float, float]]:
     """Split a (possibly wrapping-through-360) increasing interval
     [lo, hi) into 1 or 2 non-wrapping [lo, hi) parts."""
@@ -266,8 +285,15 @@ def _split_wrapping_interval(lo: float, hi: float) -> list[tuple[float, float]]:
 
 
 def _footprint_overlap_details(a: dict, b: dict) -> Optional[dict]:
-    """Real overlap between two lat/lon footprints, handling the
-    west-positive wraparound convention (see `_lon_to_x`).
+    """Real overlap between two lat/lon footprints.
+
+    `a['west_lon']`/`a['east_lon']` (and `b`'s) are expected to already be
+    in standard, increasing-eastward form — `load_geometry()` /
+    `_standardize_footprint_lon()` is what makes that true per-instrument
+    before a footprint dict ever reaches this function (FC and VIR do NOT
+    share one raw convention; see that function's docstring for the real
+    evidence). This function only handles a genuine Prime-Meridian wrap
+    in the now-standard frame (west_lon > east_lon after standardization).
 
     Returns None if not computable (degenerate/zero-extent footprint).
     Otherwise returns a dict with:
@@ -294,8 +320,8 @@ def _footprint_overlap_details(a: dict, b: dict) -> Optional[dict]:
     lat_hi = min(a["max_lat"], b["max_lat"])
     lat_overlap = max(0.0, lat_hi - lat_lo)
 
-    ax_w, ax_e = _lon_to_x(a["west_lon"]), _lon_to_x(a["east_lon"])
-    bx_w, bx_e = _lon_to_x(b["west_lon"]), _lon_to_x(b["east_lon"])
+    ax_w, ax_e = a["west_lon"] % 360.0, a["east_lon"] % 360.0
+    bx_w, bx_e = b["west_lon"] % 360.0, b["east_lon"] % 360.0
     a_parts = _split_wrapping_interval(ax_w, ax_e)
     b_parts = _split_wrapping_interval(bx_w, bx_e)
 
@@ -333,7 +359,7 @@ def _footprint_overlap_details(a: dict, b: dict) -> Optional[dict]:
     min_area, max_area = min(area_a, area_b), max(area_a, area_b)
     overlap_bbox = {
         "min_lat": lat_lo, "max_lat": lat_hi,
-        "west_lon": _x_to_lon(best_segment[0]), "east_lon": _x_to_lon(best_segment[1]),
+        "west_lon": best_segment[0], "east_lon": best_segment[1],
     }
     return {
         "iou": max(0.0, min(1.0, inter_area / union_area)),
@@ -468,11 +494,12 @@ def _crop_fc_image_to_overlap(
 
     fp = image_footprint
     lat_span = fp["max_lat"] - fp["min_lat"]
-    # See _lon_to_x()'s docstring: this dataset's WESTERNMOST/EASTERNMOST_LONGITUDE
-    # are west-positive, so the image's forward (west -> east) angular span is
-    # west_lon - east_lon, wrapping through 0/360 only if east_lon > west_lon.
-    fp_x_west, fp_x_east = _lon_to_x(fp["west_lon"]), _lon_to_x(fp["east_lon"])
-    lon_span = (fp_x_east - fp_x_west) % 360.0
+    # image_footprint / overlap_bbox are already standardized, increasing-
+    # eastward longitude (see _standardize_footprint_lon()) — the image's
+    # forward (west -> east) angular span is just east_lon - west_lon,
+    # wrapping through 0/360 only on a genuine Prime-Meridian crossing.
+    fp_west, fp_east = fp["west_lon"] % 360.0, fp["east_lon"] % 360.0
+    lon_span = (fp_east - fp_west) % 360.0
     if lat_span <= 0 or lon_span <= 0:
         logger.warning("Degenerate image footprint for %s; skipping crop", fc_data_path)
         return False
@@ -480,9 +507,9 @@ def _crop_fc_image_to_overlap(
     # north at row 0 -> row increases as latitude decreases
     row_start = (fp["max_lat"] - overlap_bbox["max_lat"]) / lat_span * n_lines
     row_stop = (fp["max_lat"] - overlap_bbox["min_lat"]) / lat_span * n_lines
-    ov_x_west, ov_x_east = _lon_to_x(overlap_bbox["west_lon"]), _lon_to_x(overlap_bbox["east_lon"])
-    col_start = ((ov_x_west - fp_x_west) % 360.0) / lon_span * n_samples
-    col_stop = ((ov_x_east - fp_x_west) % 360.0) / lon_span * n_samples
+    ov_west, ov_east = overlap_bbox["west_lon"] % 360.0, overlap_bbox["east_lon"] % 360.0
+    col_start = ((ov_west - fp_west) % 360.0) / lon_span * n_samples
+    col_stop = ((ov_east - fp_west) % 360.0) / lon_span * n_samples
 
     r0, r1 = sorted((int(round(row_start)), int(round(row_stop))))
     c0, c1 = sorted((int(round(col_start)), int(round(col_stop))))
