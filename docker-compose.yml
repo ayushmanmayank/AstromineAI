@@ -9,5 +9,15 @@ services:
       - ./backend:/app/backend
       - ./ml:/app/ml
       - ./uploads:/app/uploads
+      - ./trained_models:/app/trained_models
     env_file:
       - .env
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
