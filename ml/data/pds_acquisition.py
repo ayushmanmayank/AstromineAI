@@ -28,6 +28,7 @@ import logging
 import sys
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 from urllib.parse import urljoin
@@ -132,6 +133,45 @@ def parse_index_table(
     return records
 
 
+def _parse_pds_time(raw: Optional[str]) -> Optional[datetime]:
+    """Parse an INDEX.TAB START_TIME value. Dawn labels use two formats
+    depending on instrument: day-of-year (FC, e.g. '2011-123T13:35:16.604')
+    and calendar date (VIR, e.g. '2011-05-10T06:10:36.974')."""
+    if not raw:
+        return None
+    raw = raw.strip()
+    for fmt in ("%Y-%jT%H:%M:%S.%f", "%Y-%jT%H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.strptime(raw, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def filter_rows_by_phase(rows: list[dict], phase_window: dict) -> list[dict]:
+    """Filter parsed INDEX.TAB rows to those whose START_TIME falls within
+    `phase_window` = {'start': ISO date, 'stop': ISO date} (inclusive).
+
+    This filters by real observation timestamp, not by guessing at each
+    instrument's mission-phase directory-naming convention — FC's PDS3
+    directories are day-of-year-dated (e.g. '2011272_HAMO') and VIR's are
+    calendar-dated (e.g. '20110929_HAMO'); filtering on the row's own
+    parsed START_TIME sidesteps needing to reconcile those two formats or
+    re-derive per-volume directory paths, and works identically for both
+    instruments. See configs/config.yaml's data.mission_phases for the
+    real, verified phase date ranges this pulls from (confirmed against
+    the live archive's directory listings — see docs/month1_log.md).
+    """
+    start = datetime.strptime(phase_window["start"], "%Y-%m-%d")
+    stop = datetime.strptime(phase_window["stop"], "%Y-%m-%d")
+    filtered = []
+    for row in rows:
+        row_time = _parse_pds_time(row.get("START_TIME"))
+        if row_time is not None and start <= row_time <= stop:
+            filtered.append(row)
+    return filtered
+
+
 def _resolve_url(base_url: str, file_spec: str) -> str:
     """Join a PDS volume base_url with a FILE_SPECIFICATION_NAME.
 
@@ -201,6 +241,7 @@ def fetch_framing_camera_images(
     config: dict,
     limit: Optional[int] = None,
     level: Optional[str] = None,
+    phase: Optional[str] = None,
     session: Optional[requests.Session] = None,
 ) -> list[PDSProduct]:
     """Fetch Dawn FC2 Vesta images (+ .LBL files) per configs/config.yaml.
@@ -210,6 +251,12 @@ def fetch_framing_camera_images(
     config: the loaded configs/config.yaml dict.
     limit: only download the first `limit` products (for smoke-testing).
     level: 'raw' or 'calibrated'; defaults to config's declared default.
+    phase: a key into config's data.mission_phases (e.g. 'hamo_cycle1'),
+        or None for no phase filtering (chronologically first `limit`
+        rows in the volume, which as of Month 1 Slice 2 means approach-
+        phase OpNav frames with no footprint geometry — see
+        docs/month1_log.md). Filters INDEX.TAB rows by real START_TIME,
+        not by guessing at a phase directory name.
     """
     src_cfg = config["data"]["sources"]["dawn_fc_vesta"]
     level = level or src_cfg.get("level", "calibrated")
@@ -222,11 +269,16 @@ def fetch_framing_camera_images(
     raw_dir = Path(config["data"]["raw_dir"]) / "dawn_fc_vesta"
 
     logger.info(
-        "Fetching Dawn FC2 Vesta images: dataset_id=%s volume_id=%s level=%s",
-        sub_cfg["dataset_id"], sub_cfg["volume_id"], level,
+        "Fetching Dawn FC2 Vesta images: dataset_id=%s volume_id=%s level=%s phase=%s",
+        sub_cfg["dataset_id"], sub_cfg["volume_id"], level, phase,
     )
     rows = parse_index_table(sub_cfg["index_url"], session, timeout)
     logger.info("INDEX.TAB lists %d FC products for volume %s", len(rows), sub_cfg["volume_id"])
+
+    if phase is not None:
+        phase_window = config["data"]["mission_phases"][phase]
+        rows = filter_rows_by_phase(rows, phase_window)
+        logger.info("%d FC rows fall within phase=%s (%s to %s)", len(rows), phase, phase_window["start"], phase_window["stop"])
 
     if limit is not None:
         rows = rows[:limit]
@@ -270,6 +322,7 @@ def fetch_vir_spectra(
     limit: Optional[int] = None,
     level: Optional[str] = None,
     channels: Optional[Iterable[str]] = None,
+    phase: Optional[str] = None,
     session: Optional[requests.Session] = None,
 ) -> list[PDSProduct]:
     """Fetch Dawn VIR Vesta spectral cubes (+ .LBL files) per config.
@@ -282,6 +335,8 @@ def fetch_vir_spectra(
         defaults to config's declared default ('raw' — DWNVVIR_V1A /
         DWNVVIR_I1A, per the verified sources in configs/config.yaml).
     channels: subset of {'ir', 'vis'}; defaults to config's declared channels.
+    phase: a key into config's data.mission_phases (e.g. 'hamo_cycle1'),
+        or None for no phase filtering — see fetch_framing_camera_images().
     """
     src_cfg = config["data"]["sources"]["dawn_vir_vesta"]
     level = level or src_cfg.get("level", "raw")
@@ -316,6 +371,14 @@ def fetch_vir_spectra(
             "%d of %d VIR %s rows are primary spectral cubes (rest are HK/QQ ancillary)",
             len(science_rows), len(rows), channel,
         )
+
+        if phase is not None:
+            phase_window = config["data"]["mission_phases"][phase]
+            science_rows = filter_rows_by_phase(science_rows, phase_window)
+            logger.info(
+                "%d VIR %s rows fall within phase=%s (%s to %s)",
+                len(science_rows), channel, phase, phase_window["start"], phase_window["stop"],
+            )
 
         if limit is not None:
             science_rows = science_rows[:limit]
@@ -370,6 +433,13 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Only fetch the first N products (per instrument/channel). Use a small "
              "value first to validate the pipeline before a full pull.",
     )
+    parser.add_argument(
+        "--phase", default=None,
+        help="A key into config's data.mission_phases (e.g. 'hamo_cycle1') to filter "
+             "products by real observation time, instead of taking the chronologically "
+             "first N rows in the volume (which is approach-phase OpNav data with no "
+             "footprint geometry — see docs/month1_log.md).",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -386,9 +456,9 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     t0 = time.time()
     if args.instrument in ("fc", "both"):
-        fc_products = fetch_framing_camera_images(config, limit=args.limit, session=session)
+        fc_products = fetch_framing_camera_images(config, limit=args.limit, phase=args.phase, session=session)
     if args.instrument in ("vir", "both"):
-        vir_products = fetch_vir_spectra(config, limit=args.limit, session=session)
+        vir_products = fetch_vir_spectra(config, limit=args.limit, phase=args.phase, session=session)
     elapsed = time.time() - t0
 
     fc_ok = sum(1 for p in fc_products if p.downloaded)

@@ -111,6 +111,35 @@ data:
           index_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_V1B/INDEX/INDEX.TAB
           index_label_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_V1B/INDEX/INDEX.LBL
 
+  # Dawn Vesta mission-phase date windows, used by fetch_framing_camera_images()/
+  # fetch_vir_spectra()'s `phase=` argument to filter INDEX.TAB rows by real
+  # START_TIME instead of taking the chronologically-first N rows (which is
+  # approach-phase OpNav data with no footprint geometry -- see
+  # docs/month1_log.md, Slice 2). Start dates are directly verified against
+  # the live archive's top-level DATA/ directory listings, which use two
+  # different date-string conventions for the SAME real phase-start dates:
+  #   FC:  DATA/FITS/<YYYYDDD>_<PHASE>/   (day-of-year)
+  #   VIR: DATA/<YYYYMMDD>_<PHASE>/       (calendar date)
+  # e.g. FC '2011272_HAMO' and VIR '20110929_HAMO' are the same real date
+  # (day 272 of 2011 = 2011-09-29) -- confirmed by direct date-of-year
+  # conversion, not assumed. End dates are each phase's next-phase start
+  # date (i.e. windows are contiguous, [start, next start)).
+  mission_phases:
+    approach:            {start: "2011-05-03", stop: "2011-08-10"}
+    survey:               {start: "2011-08-11", stop: "2011-08-30"}
+    transfer_to_hamo:     {start: "2011-08-31", stop: "2011-09-28"}
+    hamo:                 {start: "2011-09-29", stop: "2011-11-01"}
+    # hamo_cycle1: the first HAMO imaging cycle only (both FC's
+    # '2011272_CYCLE1' and VIR's '20110929_CYCLE1' start 2011-09-29;
+    # VIR's '20111006_CYCLE2' starts 2011-10-06 -- confirmed live, see
+    # docs/month1_log.md). Narrow, verified-overlapping window -- this is
+    # the phase this project's re-acquisition pass actually used.
+    hamo_cycle1:           {start: "2011-09-29", stop: "2011-10-05"}
+    transfer_to_lamo:      {start: "2011-11-02", stop: "2011-12-11"}
+    lamo:                  {start: "2011-12-12", stop: "2012-06-14"}
+    hamo_2:                {start: "2012-06-15", stop: "2012-07-24"}
+    transfer_to_ceres:     {start: "2012-07-25", stop: "2012-09-05"}
+
 acquisition:
   user_agent: "AstroMineAI-DataAcquisition/0.1 (contact: akshatjha1981@gmail.com)"
   request_timeout_seconds: 60

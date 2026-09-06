@@ -788,3 +788,192 @@ until that re-acquisition happens.** Once it does, whether Month 2 needs
 to be scoped down (binary instead of 3-class, or explicitly exploratory
 given N) is a decision to make from the real resulting N — not from this
 pass's zero, and not preemptively guessed at here.
+
+---
+
+## Slice 6: Fix the acquisition source (HAMO/LAMO instead of Approach/OpNav)
+
+This pass changed **only** `ml/data/pds_acquisition.py` and
+`configs/config.yaml` — `ml/data/spatial_alignment.py`,
+`ml/utils/splits.py`, and `ml/data/spectral_labeling.py` were not touched,
+per scope.
+
+### What was verified before writing any code
+
+1. **Real directory listings**, not assumed:
+   - `https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_1B/DATA/FITS/` gives
+     `2011123_APPROACH/`, `2011223_SURVEY/`, `2011243_TRANSFER_TO_HAMO/`,
+     `2011272_HAMO/`, `2011306_TRANSFER_TO_LAMO/`, `2011346_LAMO/`,
+     `2012167_HAMO_2/`, `2012207_TRANSFER_TO_CERES/` — day-of-year dated
+     (`YYYYDDD_PHASE`).
+   - `https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_V1B/DATA/` (and
+     the `DWNVVIR_I1B` equivalent, identical) gives `20110503_APPROACH/`,
+     `20110811_SURVEY/`, `20110831_TRANSFER_TO_HAMO/`, `20110929_HAMO/`,
+     `20111212_LAMO/`, `20120615_HAMO_2/`, `20120725_TRANSFER_TO_CERES/`
+     — calendar-dated (`YYYYMMDD_PHASE`).
+   - Confirmed these name the same real dates in two different formats
+     (day 272 of 2011 = 2011-09-29 = VIR's `20110929`; day 346 =
+     2011-12-12 = VIR's `20111212`; day 167 of 2012, a leap year, =
+     2012-06-15 = VIR's `20120615`) by direct day-of-year conversion, not
+     assumed.
+   - Confirmed both instruments' HAMO cycle 1 starts the same real date:
+     FC `2011272_CYCLE1`, VIR `20110929_CYCLE1`, both 2011-09-29; VIR's
+     `20111006_CYCLE2` starts 2011-10-06, giving a clean, verified,
+     one-week window for cycle 1 alone.
+2. **FC footprint geometry, spot-checked on 3 real HAMO .LBL files**
+   (`2011272_HAMO/2011272_CYCLE1/2011272_C1_ORBIT01/FC21B000696{3,4,5}...LBL`):
+   all three have real, populated MINIMUM_LATITUDE/MAXIMUM_LATITUDE/
+   WESTERNMOST_LONGITUDE/EASTERNMOST_LONGITUDE (e.g. 38.87/59.23/208.80/
+   239.36 degrees) — confirming HAMO frames carry the geometry OpNav
+   frames lacked, before building acquisition around that assumption.
+
+### A significant, unplanned discovery during this verification
+
+Checking real numeric values from these HAMO labels surfaced something
+that changes the confidence level on Slice 4's longitude-convention fix:
+the 3 FC HAMO labels above all have WESTERNMOST_LONGITUDE less than
+EASTERNMOST_LONGITUDE (e.g. 208.80 < 239.36) — the opposite ordering from
+every VIR label checked so far (Slice 4, and re-confirmed here on 3 real
+VIR HAMO labels, e.g. WESTERNMOST_LONGITUDE=88.343 greater than
+EASTERNMOST_LONGITUDE=73.480). Reading each with the convention that
+matches its own physically-plausible footprint size (FC: standard
+east-increasing, roughly 18-30 degree spans; VIR: west-positive, roughly
+13-15 degree spans) gives sensible results for both; reading either with
+the other's convention gives an implausible (over 180 degree) span.
+
+This suggests FC and VIR may use opposite longitude-ordering conventions
+from each other in this archive, not one shared convention (west-
+positive) as Slice 4 concluded from VIR-only evidence — Slice 4 had no
+real numeric FC example to check against (OpNav FC frames' geometry
+fields were all "N/A"), so it generalized from VIR data alone. This is
+flagged here, not fixed (out of scope for this pass — `_lon_to_x()` in
+`ml/data/spatial_alignment.py` is still unmodified), with a concrete,
+quantified worked example below showing this is very likely actively
+suppressing real overlap in the new HAMO data.
+
+### Code changes
+
+- `ml/data/pds_acquisition.py`: added `filter_rows_by_phase()` and a
+  `phase=` parameter on both `fetch_framing_camera_images()` and
+  `fetch_vir_spectra()`. Filters parsed INDEX.TAB rows by real START_TIME
+  (parsed per-row, handling both instruments' date formats) falling
+  within a named window — not by reconstructing per-phase directory
+  paths, since FC and VIR name theirs differently and HAMO in particular
+  nests `<phase>/<date>_CYCLE<n>/<date>_C<n>_ORBIT<n>/` for FC. The
+  volume-level INDEX.TAB already lists every product with a real
+  timestamp, so date filtering there needs no new path-construction
+  logic at all.
+- `configs/config.yaml`: added `data.mission_phases`, a verified real
+  date-window table built directly from the two live directory listings
+  above, plus `hamo_cycle1` (2011-09-29 to 2011-10-05) as the specific,
+  verified-overlapping window this pass actually used.
+- CLI: `python -m ml.data.pds_acquisition --phase hamo_cycle1 --limit N`.
+
+### Re-download: real HAMO cycle 1 data
+
+Command:
+```
+python -m ml.data.pds_acquisition --instrument fc  --limit 10 --phase hamo_cycle1 -v
+python -m ml.data.pds_acquisition --instrument vir --limit 10 --phase hamo_cycle1 -v
+```
+Result: 5080 FC rows and 40+40 VIR rows (ir/vis) fall within
+phase=hamo_cycle1 (2011-09-29 to 2011-10-05); 10/10 FC and 20/20 VIR
+downloaded.
+
+Spot-checked the downloaded labels directly (not just the ones fetched
+for verification above): every downloaded FC and VIR label in this batch
+has real, non-"N/A" MINIMUM_LATITUDE etc., and real timestamps inside
+2011-09-29 to 2011-10-04 — both root causes from Slice 2 (missing FC
+geometry, no FC/VIR time overlap) are confirmed fixed by this acquisition
+change.
+
+Pulled a larger FC batch (`--limit 150`, same phase) to give a fairer
+test than 10 frames (which happened to all sit in one ~70-second nadir
+track, 38.9 to 34.5 degrees N) — 150 frames sweep -17.8 to 59.2 degrees
+N, a real, wide latitude range, confirming FC's nadir track does cross
+into VIR's imaged latitude band (VIR's downloaded sample covers roughly
+-35 to -7 degrees).
+
+### Alignment result: still 0 pairs — but for a newly, precisely diagnosed reason
+
+Command:
+```
+python -m ml.data.spatial_alignment -v
+```
+Result:
+```
+Loaded geometry for 200/200 FC images (160 with usable footprint) and 100/100 VIR spectra (84 with usable footprint)
+Alignment: 1600 FC x 24 VIR candidates fell inside the 24.0h time window; 1600 pairs had computable overlap; 0/1600 survived confidence >= 0.30
+```
+
+0 pairs survived — but for the first time, this is NOT "geometry missing"
+or "time window too wide." Both are now confirmed fixed: 160/200 FC
+frames have real footprints (vs. 0/40 in every prior slice), and 1600
+FC-VIR candidate pairs fell inside the 24-hour time window (vs. 0 in
+every prior slice) — real, meaningful confidence values were computed
+for all 1600 (122 of them nonzero), not rejected as uncomputable.
+
+Diagnosed why none reached the 0.30 threshold (not left as "maybe still
+no overlap"): the maximum confidence across all 1600 real pairs was
+0.0172. The best candidate pair (FC 0007106 vs VIR
+VIR_VIS_1B_1_370617178) has real, substantial latitude overlap (FC:
+-15.13 to 3.64 degrees; VIR: -19.9 to -7.69 degrees; overlap = 7.45
+degrees) — but its confidence is crushed by the longitude-convention
+issue found above: FC's raw footprint (west_lon=89.01 less than
+east_lon=107.70, a true, physically-sensible 18.69 degree span under
+FC's own — apparently standard east-increasing — convention) gets run
+through `_lon_to_x()` (built from VIR-only evidence in Slice 4) and
+comes out as a 341.31 degree span — an 18.3x inflation, verified by
+direct computation, not estimated. That inflated span massively inflates
+FC's computed footprint area, which crushes overlap_coefficient (divided
+by the smaller of the two areas — here, even inflated, still likely FC)
+toward zero regardless of how much the footprints genuinely overlap.
+
+Answering the task's specific diagnostic question directly: geometry is
+no longer missing, and the time window is no longer too wide — the
+footprints most likely DO genuinely overlap for at least one real
+candidate pair in this small batch, but the pre-existing (out of scope
+for this pass) longitude-handling bug appears to be suppressing that
+overlap's computed confidence by well over an order of magnitude.
+
+Per this pass's explicit constraint, `_lon_to_x()` /
+`compute_footprint_overlap()` were not modified to chase this down
+further, and confidence thresholds were not touched either — no survivor
+was manufactured. This is reported as a precise, actionable, quantified
+finding for a dedicated follow-up pass, which should very likely treat FC
+and VIR as needing different longitude-sign handling, not one shared
+transform (see Slice 4's `_lon_to_x()` docstring, still accurate about
+being an inferred-not-certain interpretation, now with much stronger
+counter-evidence attached here).
+
+### Part 7 — footprint area-ratio distribution, re-run
+
+Command:
+```
+python scripts/data_audit.py
+```
+Still reports "N=0, not computable" — sample_metadata.csv still has 0
+surviving rows (the audit script measures area ratios over survivors,
+per its docstring), and this pass's root-cause finding above is about
+confidence being crushed pre-threshold, not about survivors existing
+that the audit script failed to pick up. The size-ratio distortion was
+computed ad hoc for diagnosis above instead (this pass's best candidate
+pair: FC true area approximately 351 square degrees vs. code-computed
+approximately 6405 square degrees — the same 18.3x distortion, carried
+through to area) — worth wiring into `scripts/data_audit.py` as a
+candidate-level (not just survivor-level) report in the same follow-up
+pass that fixes the longitude handling, so this distribution can be
+inspected across every candidate pair, not just survivors, going
+forward.
+
+### Updated go/no-go
+
+Still NO-GO for Month 2 — 0 real survivors. But the diagnosis changed in
+an important way: this pass's acquisition-source fix worked (real
+footprint geometry and real time overlap, confirmed on real downloaded
+data) — the remaining blocker has moved from "acquisition source" (fixed
+this pass) to "the longitude-convention bug in spatial_alignment.py, now
+confirmed by real HAMO evidence to likely be actively suppressing a
+genuine overlapping pair," which is squarely the next, now well-evidenced
+fix to make — in a dedicated pass, per every prior pass's scope
+boundaries, not slipped in here.
