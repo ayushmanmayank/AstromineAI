@@ -1,0 +1,118 @@
+# AstroMineAI Month 1 configuration
+#
+# Slice 1 scope: verified data acquisition only (Vesta, Dawn FC + Dawn VIR).
+# All URLs below were resolved and spot-checked by hand against the live
+# PDS Small Bodies Node archive on 2026-08-26/27 (see docs/month1_log.md).
+
+target_body: vesta
+
+data:
+  raw_dir: datasets/raw
+  processed_dir: datasets/processed
+  metadata_dir: datasets/metadata
+
+  # Slice 2 (spatial_alignment.py) parameters.
+  # min_spatial_correspondence_confidence: 0.3 is a starting threshold, not
+  # a validated cutoff — pick it low enough to not silently discard every
+  # marginal pair while we still have so few candidates to look at. Revisit
+  # once the Month 1 data audit has real confidence-score distributions to
+  # look at.
+  min_spatial_correspondence_confidence: 0.3
+  # Time window used to shortlist FC/VIR candidate pairs before doing any
+  # geometry math. 24h covers same-orbit-pass and same-observation-sequence
+  # timescales without being so wide it's meaningless.
+  max_time_delta_hours: 24.0
+
+  # Slice 3 (splits.py) parameters. Region-based split — see
+  # src/utils/splits.py's assign_region_based_splits().
+  splits:
+    train: 0.7
+    val: 0.15
+    test: 0.15
+    seed: 42
+    bin_size_degrees: 5.0
+
+  sources:
+    # ------------------------------------------------------------------
+    # Dawn Framing Camera (FC2), Vesta mission phase.
+    #
+    # Confirmed live node: PDS Small Bodies Node (SBN), hosted at PSI.
+    #   - pds-smallbodies.astro.umd.edu is the node's legacy domain; it
+    #     redirects but its content no longer indexes Dawn holdings.
+    #   - pds-geosciences.wustl.edu does NOT host Dawn FC/VIR data
+    #     (confirmed 404 on /dawn/) — that node hosts other missions
+    #     (e.g. MESSENGER, GRAIL).
+    #   - pds-imaging.jpl.nasa.gov does NOT host Dawn data either.
+    #   - Live archive root: https://sbnarchive.psi.edu/pds3/dawn/fc/
+    dawn_fc_vesta:
+      description: >
+        Dawn Framing Camera 2 (FC2) images of Vesta, PDS3 archive volumes.
+      node: "PDS Small Bodies Node (sbnarchive.psi.edu)"
+      instrument: FC2
+      target: VESTA
+      level: calibrated   # which sub-source fetch_framing_camera_images() uses by default
+      raw:
+        dataset_id: DAWN-A-FC2-2-EDR-VESTA-IMAGES-V1.0
+        volume_id: DWNVFC2_1A
+        base_url: https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_1A/
+        index_url: https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_1A/INDEX/INDEX.TAB
+        index_label_url: https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_1A/INDEX/INDEX.LBL
+      calibrated:
+        dataset_id: DAWN-A-FC2-3-RDR-VESTA-IMAGES-V1.0
+        volume_id: DWNVFC2_1B
+        base_url: https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_1B/
+        index_url: https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_1B/INDEX/INDEX.TAB
+        index_label_url: https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_1B/INDEX/INDEX.LBL
+
+    # ------------------------------------------------------------------
+    # Dawn VIR (Visible and InfraRed Mapping Spectrometer), Vesta phase.
+    # Same node as FC: PDS Small Bodies Node (sbnarchive.psi.edu).
+    # VIR has two independent channels (vis, ir), each archived as its own
+    # volume, at two processing levels (raw EDR = *1A, calibrated RDR = *1B).
+    # Default level is 'calibrated' (DWNVVIR_V1B / DWNVVIR_I1B) — raw EDR
+    # is uncalibrated instrument DN, not reflectance-like data, and is not
+    # valid input for the band-depth label scheme (see
+    # ml/data/spectral_labeling.py and docs/month1_log.md, Slice 3's
+    # data-quality-gate finding). 'raw' is kept configured as an
+    # explicit alternative, not the default.
+    dawn_vir_vesta:
+      description: >
+        Dawn VIR spectral cubes (VIS + IR channels) of Vesta, PDS3 archive
+        volumes.
+      node: "PDS Small Bodies Node (sbnarchive.psi.edu)"
+      instrument: VIR
+      target: VESTA
+      level: calibrated  # which sub-source(s) fetch_vir_spectra() uses by default
+      channels: [ir, vis]
+      raw:
+        ir:
+          dataset_id: DAWN-A-VIR-2-EDR-IR-VESTA-SPECTRA-V1.0
+          volume_id: DWNVVIR_I1A
+          base_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_I1A/
+          index_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_I1A/INDEX/INDEX.TAB
+          index_label_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_I1A/INDEX/INDEX.LBL
+        vis:
+          dataset_id: DAWN-A-VIR-2-EDR-VIS-VESTA-SPECTRA-V1.0
+          volume_id: DWNVVIR_V1A
+          base_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_V1A/
+          index_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_V1A/INDEX/INDEX.TAB
+          index_label_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_V1A/INDEX/INDEX.LBL
+      calibrated:
+        ir:
+          dataset_id: DAWN-A-VIR-3-RDR-IR-VESTA-SPECTRA-V1.0
+          volume_id: DWNVVIR_I1B
+          base_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_I1B/
+          index_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_I1B/INDEX/INDEX.TAB
+          index_label_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_I1B/INDEX/INDEX.LBL
+        vis:
+          dataset_id: DAWN-A-VIR-3-RDR-VIS-VESTA-SPECTRA-V1.0
+          volume_id: DWNVVIR_V1B
+          base_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_V1B/
+          index_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_V1B/INDEX/INDEX.TAB
+          index_label_url: https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_V1B/INDEX/INDEX.LBL
+
+acquisition:
+  user_agent: "AstroMineAI-DataAcquisition/0.1 (contact: akshatjha1981@gmail.com)"
+  request_timeout_seconds: 60
+  retries: 3
+  retry_backoff_seconds: 2

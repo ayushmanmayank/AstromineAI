@@ -1,1 +1,28 @@
-# Add Python dependencies for AstroMineAI here.
+# Core ML stack
+torch>=2.2
+torchvision>=0.17
+timm>=0.9
+scikit-learn>=1.4
+captum>=0.7
+
+# Data / utils
+numpy>=1.26
+pandas>=2.2
+Pillow>=10.0
+PyYAML>=6.0
+requests>=2.31
+urllib3>=2.0
+tqdm>=4.66
+tensorboard>=2.16
+
+# PDS3 data acquisition + spectral cube reading (ml/data/pds_acquisition.py,
+# ml/data/spatial_alignment.py, ml/data/spectral_labeling.py)
+astropy>=6.0
+
+# Backend
+fastapi>=0.110
+uvicorn[standard]>=0.29
+python-multipart>=0.0.9
+
+# Testing
+pytest>=8.0
