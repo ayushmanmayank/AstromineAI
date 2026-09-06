@@ -651,3 +651,140 @@ labeled data, because there is none. Building it now doesn't change the
 Month 2 go/no-go call above; it means Month 2 can start immediately once
 acquisition produces real surviving pairs, without also needing to write
 this scaffold at that point.
+
+---
+
+## Slice 5: Final Month 1 audit, label scheme, labels + splits, go/no-go
+
+This pass re-ran the real pipeline (without editing
+`ml/data/pds_acquisition.py` or `ml/data/spatial_alignment.py`), re-audited
+the real output, confirmed the label scheme, ran labeling + region-based
+splits for real, and closes out Month 1 with a final go/no-go call.
+
+### Part A — Data audit (re-run, real numbers)
+
+```
+python -m ml.data.spatial_alignment -v
+```
+```
+Loaded 40 downloaded FC image products and 80 downloaded VIR spectrum products from manifests
+Loaded geometry for 40/40 FC images (0 with usable footprint) and 80/80 VIR spectra (64 with usable footprint)
+Alignment: 0 FC x 24 VIR candidates fell inside the 24.0h time window; 0 pairs had computable overlap; 0/0 survived confidence >= 0.30
+Done: 40 FC images, 80 VIR spectra considered; 0 pairs survived confidence >= 0.30
+```
+
+```
+python scripts/data_audit.py
+```
+```
+Total surviving pairs: 0
+
+N=0: there is nothing to compute a confidence distribution, spatial
+distribution, time-of-observation spread, or footprint area-ratio
+distribution over.
+
+VERDICT: cannot support ANY model comparison (3-way or otherwise) —
+there are zero labeled training examples.
+```
+
+**Total surviving pairs: 0 — unchanged from Slice 2/3/4, confirmed again
+on this branch.** All five reported metrics (confidence distribution,
+spatial distribution, mission-phase spread, and the newly-added img/spec
+footprint area-ratio distribution) are genuinely not computable at N=0,
+not omitted or approximated.
+
+**New this pass**: `scripts/data_audit.py` now also recomputes each
+surviving pair's real footprint-area ratio (the open "specificity"
+question flagged in `spatial_alignment.py`'s `compute_footprint_overlap()`
+docstring), via a read-only import of `load_geometry()` — added because
+the task asked to compute this now that real footprints exist for at
+least one side of each candidate (64/80 VIR spectra have usable
+footprints). It could not be exercised on any *surviving pair* because
+there are none, but it is real, tested code (uses the same
+`_lon_to_x`-based area formula `spatial_alignment.py` itself scores pairs
+with) ready to report on the real distribution the moment any pair
+survives.
+
+**Go/no-go, Part A: NO — 0 is not a small or clustered sample to caveat
+around, it is an absence of data.** No 3-way (or any) model comparison is
+supportable.
+
+### Part B — Label scheme (confirmed, not re-derived)
+
+The label scheme built in Slice 3 (`ml/data/spectral_labeling.py`) already
+satisfies this pass's requirements and was not rewritten:
+
+- VIR Band I (~0.9–1.0 μm) / Band II (~1.9–2.0 μm) continuum-removed
+  band-center thresholds — real wavelength calibration confirmed against
+  each cube's own `BAND_BIN_CENTER` array (not the SIS's prose, which only
+  states the instrument's total coverage, 0.25–1.07 μm VIS / 1.02–5.0 μm
+  IR — see Slice 3 for why per-cube `BAND_BIN_CENTER` is the authoritative
+  per-product wavelength source, not a fixed table).
+- 3 classes (`diogenite_like` / `howardite_like` / `eucrite_like`) + 1
+  quality-gate class (`indeterminate_weak_feature`) for a weak/unfittable
+  feature or an uncalibrated (raw EDR) product.
+- Exact thresholds and full reasoning: see Slice 3, "Part B — VIR-only
+  label scheme", above — unchanged.
+- No-heuristic-labels constraint is stated at the top of
+  `ml/data/spectral_labeling.py`'s module docstring (confirmed present,
+  quoted in Slice 3 above) — FC imagery is never opened by this module.
+
+No code change was needed here; re-stated for this pass's audit trail
+rather than left implicit.
+
+### Part C — Labels + splits (re-run, real numbers)
+
+```
+python scripts/finalize_month1_labels.py
+```
+```
+Loaded 0 records from datasets\metadata\sample_metadata.csv
+Class balance after labeling (0 records): {}
+Split assignment: {}
+Per-split, per-class counts:
+Wrote 0 validated records back to datasets\metadata\sample_metadata.csv
+```
+
+- **Class balance: N/A — 0 records.** No class dominates because none
+  are populated.
+- **Per-split counts (train/val/test, 0.70/0.15/0.15 from
+  `configs/config.yaml`): all zero.**
+- `datasets/metadata/sample_metadata.csv` rewritten via
+  `write_metadata_csv()` (which runs `validate()` on every row — 0 rows
+  means 0 validations, not a bypassed check) — header intact, 0 data
+  rows.
+- `tests/test_metadata_schema.py`: still 26/26 passing, confirming
+  `validate()`'s rejection rules (generic/blank `label_source`, missing
+  provenance, invalid `split`) are intact and unweakened.
+
+### Part D — Final Month 1 close-out
+
+**Final real independent sample count: 0.** Every audit metric requested
+in Part A is genuinely not computable at this N. Class balance and
+per-split counts are all zero (Part C). The label scheme is finalized and
+implemented but has not labeled a single real sample, because there is
+nothing to label.
+
+**Go/no-go for Month 2: NO-GO — unchanged across every slice of Month 1
+(2 through 5) that has checked this.** This is not a small-N caveat to
+flag and proceed past; there is no dataset. Re-running the audit/label/
+split pipeline again without changing what gets acquired will keep
+producing this same real zero — confirmed twice more on this branch this
+pass, exactly as predicted in Slice 2.
+
+The concrete blocker, restated once more since it has not changed:
+`ml/data/pds_acquisition.py`'s current sample (FC: `2011123_OPNAV_001`
+approach-phase frames, no computed footprint geometry at all; VIR: two
+independent approach-phase sequences 7–36 days away from the FC sample)
+cannot produce a surviving pair no matter how alignment or labeling code
+is adjusted, because the blocker is upstream of both. The fix remains:
+re-run acquisition against a **shared HAMO/LAMO time window for both
+instruments** (a change to `pds_acquisition.py`, correctly not made in
+this pass), then re-run `spatial_alignment.py` and this pass's now-fully
+-ready audit/label/split pipeline against real survivors.
+
+**Month 2 should not start under the original 3-way, multi-class scope
+until that re-acquisition happens.** Once it does, whether Month 2 needs
+to be scoped down (binary instead of 3-class, or explicitly exploratory
+given N) is a decision to make from the real resulting N — not from this
+pass's zero, and not preemptively guessed at here.

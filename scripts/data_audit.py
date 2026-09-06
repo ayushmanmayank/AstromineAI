@@ -7,6 +7,13 @@ pretending there's a distribution to describe):
   - correspondence_confidence distribution (min/median/max + histogram)
   - spatial distribution of surviving regions (clustered vs spread)
   - time-of-observation spread across mission phases
+  - img/spec footprint area-ratio distribution — the "specificity" concern
+    flagged in ml/data/spatial_alignment.py's compute_footprint_overlap()
+    docstring (size_ratio_penalty's exact strength was a placeholder,
+    pending a real distribution to look at). This recomputes each
+    surviving pair's original footprints from their .LBL files via
+    load_geometry() (a read-only import — this script does not modify
+    spatial_alignment.py) to get real area ratios, not estimates.
 
 Read-only: does not touch datasets/metadata/sample_metadata.csv.
 """
@@ -22,7 +29,21 @@ import pandas as pd
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+from ml.data.spatial_alignment import load_geometry  # noqa: E402
 from ml.utils.metadata_schema import read_metadata_csv  # noqa: E402
+
+
+def _footprint_area_deg2(footprint: dict) -> float:
+    """Plain equirectangular degree^2 area — same approximation used in
+    spatial_alignment.py's _footprint_overlap_details(), so the ratio
+    reported here is on the same basis as what compute_footprint_overlap()
+    actually scored pairs with."""
+    from ml.data.spatial_alignment import _lon_to_x  # noqa: PLC0415
+
+    x_west, x_east = _lon_to_x(footprint["west_lon"]), _lon_to_x(footprint["east_lon"])
+    lon_span = (x_east - x_west) % 360.0
+    lat_span = footprint["max_lat"] - footprint["min_lat"]
+    return lat_span * lon_span
 
 
 def mission_phase_from_time(iso_time: str) -> str:
@@ -61,9 +82,10 @@ def main() -> int:
     if n == 0:
         print()
         print("N=0: there is nothing to compute a confidence distribution, spatial")
-        print("distribution, or time-of-observation spread over. This is reported")
-        print("plainly rather than fabricated or skipped — see docs/month1_log.md")
-        print("for why (Slice 2's real geometry/time-window findings).")
+        print("distribution, time-of-observation spread, or footprint area-ratio")
+        print("distribution over. This is reported plainly rather than fabricated or")
+        print("skipped — see docs/month1_log.md for why (Slice 2's real geometry/")
+        print("time-window findings).")
         print()
         print("VERDICT: cannot support ANY model comparison (3-way or otherwise) —")
         print("there are zero labeled training examples.")
@@ -94,6 +116,28 @@ def main() -> int:
     print("--- time-of-observation spread ---")
     df["mission_phase"] = df["image_start_time"].apply(mission_phase_from_time)
     print(df["mission_phase"].value_counts().to_string())
+
+    print()
+    print("--- img/spec footprint area-ratio distribution ---")
+    ratios = []
+    for r in records:
+        img_geom = load_geometry(r.image_label_path)
+        spec_geom = load_geometry(r.spectrum_label_path)
+        if img_geom is None or spec_geom is None or img_geom.footprint is None or spec_geom.footprint is None:
+            continue
+        area_img = _footprint_area_deg2(img_geom.footprint)
+        area_spec = _footprint_area_deg2(spec_geom.footprint)
+        if area_img > 0 and area_spec > 0:
+            ratios.append(max(area_img, area_spec) / min(area_img, area_spec))
+    if not ratios:
+        print("Could not recompute footprints for any surviving pair (unexpected — every")
+        print("surviving pair should have had both footprints to survive at all).")
+    else:
+        ratios = np.array(ratios)
+        print(f"n={len(ratios)}  min={ratios.min():.2f}x  median={np.median(ratios):.2f}x  max={ratios.max():.2f}x")
+        print("(this is the ratio compute_footprint_overlap()'s size_ratio_penalty divides")
+        print("by; see docs/month1_log.md for whether the current linear penalty looks right")
+        print("against this real distribution.)")
 
     return 0
 
