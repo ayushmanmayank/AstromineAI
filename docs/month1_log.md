@@ -2048,3 +2048,147 @@ is to make `compute_band_center()` report a confidence/ambiguity flag
 when multiple local minima are within some tolerance of the global one
 (or to widen/smooth the fit window), then re-run the Slice 10/11 audits
 before any labeling proceeds.
+
+## Slice 13: fixing the band-center instability (compute_band_center_v2)
+
+**Task**: Slice 12 found, with direct evidence, that `compute_band_center()`
+discretely snaps between near-tied local minima under realistic noise.
+This slice fixes it — diagnosis-to-fix, not labeling. Per explicit scope:
+`ml/data/spatial_alignment.py`, `ml/utils/splits.py`, the specificity
+penalty, and `ml/data/pds_acquisition.py` untouched (confirmed, `git diff
+--stat` empty on all three); `compute_band_center()` itself is also
+untouched — the fix lives entirely in a new function,
+`compute_band_center_v2()`, added alongside it. No labeling or class
+assignment attempted with the new method's output.
+
+**Step 1 — fix approach chosen.** Option (b)(ii) from this task's menu:
+ambiguity-aware fitting with a depth-weighted centroid across tied
+candidates. Rejected option (a) (simply widening the single parabola
+window) because Slice 12's competing minima are ~0.2 μm apart — wider
+than any window that could still represent one physical absorption
+feature; a single wider parabola would either miss a tied candidate or
+badly misfit both. Rejected option (c) (a full Modified Gaussian Model)
+because the diagnosed failure is a *multi-candidate selection*
+instability (which of several genuine local dips wins an argmin), not a
+poor local shape fit — directly modeling that ambiguity is the targeted
+fix, without a full band-shape optimizer's added implementation risk.
+
+**Two real design corrections found during this task's own validation**
+(required by the task before finalizing anything — not assumed):
+
+1. *Normalization.* An early draft measured "relative depth" against a
+   candidate's raw continuum-removed value. Real Vesta Band II curves sit
+   on a large, roughly-constant continuum-removed offset (~0.6-0.7, not
+   near 0); normalizing against that offset directly made the tolerance
+   far too permissive, pulling in 7+ shallow ripple-level points spanning
+   nearly the whole window. Fixed by normalizing against the deepest
+   candidate's own band depth (`1 - removed`) instead, which recovered the
+   ~2-4 candidates Slice 12's manual inspection found.
+2. *Hard cutoff → smooth weight.* A second draft used a hard tie/no-tie
+   cutoff (a candidate is either "in" or "out" of a discrete group, then
+   averaged). Validating that draft against Slice 12's own perturbation
+   test (real spectrum, real noise) showed it reproduces a version of the
+   exact jumping behavior it was meant to fix: small noise flips
+   candidates across the hard boundary, and each flip discontinuously
+   changes which points feed the average. Replaced with a smooth
+   (soft-argmin / Boltzmann) depth-weighted centroid — every candidate
+   always contributes some, possibly tiny, weight, so the output changes
+   continuously as the input changes continuously. A further correction
+   restricted this smooth weighting to genuine discrete local minima
+   (not every sample in the window): weighting every sample flagged any
+   sufficiently broad single real feature as "ambiguous" too, since
+   neighboring samples near one smooth trough's bottom are naturally
+   close in depth — which fails step 4's single-minimum correctness
+   requirement outright. Final design: find discrete local minima, fit
+   each one's own sub-pixel vertex (identical parabola math to
+   `compute_band_center()`), then combine with the smooth weight.
+
+`BandCenterResult` adds `ambiguous` (bool), `confidence` (0-1, from the
+weight distribution's participation ratio — 1.0 when one candidate
+carries all the weight), and `n_candidates` (effective number of
+competing local minima), alongside `center_um`.
+
+**Step 2/4 — validation.**
+
+*Perturbation test (clock 370705798, unperturbed old fit = 1.95721 μm)*:
+
+| noise amplitude | old method spread (10 seeds) | v2 spread (10 seeds) |
+|---|---|---|
+| 0.1% | 0.00016 μm | 0.00896 μm |
+| 0.5% | 0.20842 μm (already at the jump plateau) | 0.04283 μm |
+| 1.0% | 0.20975 μm | 0.07923 μm |
+| 2.0% | 0.21170 μm | 0.11449 μm |
+| 5.0% | 0.21488 μm | 0.15203 μm |
+
+The old method's spread jumps to its ~0.21 μm plateau almost immediately
+(between 0.1% and 0.5% noise) and stays flat — the discrete bimodal
+snap. v2's spread grows smoothly and monotonically with noise amplitude
+instead, with no discrete jump at any tested level. Sub-grid wavelength
+shifts (no noise) also produced smooth v2 output (2.044 → 2.012 μm across
+a full grid step). This is the qualitative signature step 3a required:
+"varies smoothly," not "jumps between two values."
+
+*Correctness check (single clean synthetic minimum, no near-ties)*: v2
+returned `ambiguous=False`, `confidence=1.0`, `n_candidates=1`, and
+matched the old method's output to within 1e-6 μm — confirming the fix
+does not change behavior on genuinely unambiguous features.
+
+*Full real dataset (23 real paired observations: 15 HAMO + 8 LAMO, same
+manifests as Slices 10/11, no new downloads)*: **all 23 of 23 flag
+`band_ii_ambiguous=True`** (and all 23 also flag `band_i_ambiguous=True`).
+This is itself an important, honest finding: the instability Slice 12
+diagnosed is not confined to a couple of edge-case spectra — under a
+properly-normalized, evidence-based ambiguity test, every single real
+Band II (and Band I) fit in this dataset shows a genuinely competing
+near-tied local minimum. New Band II center values ranged 2.0016-2.0782 μm
+across the 23 observations (full per-clock table in
+`scripts/audit_band_separability_v2.py`'s output) — notably, this range
+sits *between* the two original clusters (~1.957 and ~2.164 μm), not on
+either one, consistent with the centroid honestly averaging competing
+candidates rather than picking a side.
+
+**Step 3 — re-run silhouette scores, same real data, v2 method (both
+bands switched to v2 for internal consistency — see
+`scripts/audit_band_separability_v2.py`'s docstring for why)**:
+
+| dataset | old method (buggy) | v2 method |
+|---|---|---|
+| HAMO-only, n=15 (Slice 10 baseline) | 0.9982 / 0.9058 / 0.7234 | **0.590 / 0.621 / 0.588** |
+| LAMO-only, n=8 (Slice 11 baseline) | 0.8740 / 0.6175 / 0.5192 | **0.607 / 0.669 / 0.468** |
+| Combined, n=23 (no old-method baseline exists for this exact split) | — | 0.538 / 0.581 / 0.551 |
+
+**A substantial drop, reported exactly as measured — not a total
+collapse.** The old method's near-perfect scores (0.90-1.00 at the best
+k for each dataset) do not survive the fix; v2 lands in the 0.47-0.67
+range across every k and every dataset — conventionally "moderate,
+real-but-weak" clustering structure, not "no structure at all" (which
+would show near-zero or negative scores) and not "clean separation
+either" (which the old numbers falsely suggested).
+
+**Verdict: Slice 12's diagnosis is substantially confirmed, not fully
+resolved into either extreme.** The dramatic, near-perfect bimodal
+separation reported in Slices 10-11 does not survive a fitting method
+that is demonstrably robust to the exact noise level that broke the old
+one — most of what looked like clean structure was very likely the
+diagnosed artifact. But silhouette scores in the 0.47-0.67 range are not
+nothing: some real clustering signal in (Band I, Band II) space persists
+under the more honest method, and 23/23 observations being flagged
+ambiguous means the *entire* dataset's Band II fits carry real
+uncertainty that a compositional-labeling pass would need to account for
+directly (e.g. propagate `confidence` as a per-sample weight, or exclude
+low-confidence samples), not average away. This does not, by itself,
+tell us whether the surviving ~0.5-0.6 silhouette reflects genuine Vesta
+geology, a residual (weaker) version of the session confound Slice 11
+found, or some other structure — that question is explicitly out of
+scope here and belongs to whatever task takes on labeling next.
+
+**What was not done, stated plainly**: no attempt was made to tune
+`BAND_CENTER_TIE_TOLERANCE` (0.03) to land on any particular silhouette
+result — it was fixed by the physical reasoning in Step 1, before this
+step's numbers were known, per this task's explicit constraint. A full
+Modified Gaussian Model fit (option c) was not implemented; if the
+surviving ~0.5-0.6 structure is judged worth pursuing further, an MGM
+fit (or an independent noise-floor characterization from VIR's actual
+documented instrument specs, rather than this task's illustrative
+Gaussian/uniform-shift perturbation models) would be the natural next
+methodological step before labeling.

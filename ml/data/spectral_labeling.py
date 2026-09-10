@@ -296,6 +296,202 @@ def compute_band_center(wavelengths: np.ndarray, spectrum: np.ndarray, left_um: 
     return float(vertex)
 
 
+# Smoothing scale for compute_band_center_v2()'s soft-weighted centroid,
+# expressed as a fraction of the deepest candidate's own band depth.
+# Slice 12 (docs/month1_log.md) measured real near-ties across all 6
+# spectra it checked at well under 2% relative depth apart; 3% is chosen
+# to comfortably cover that observed margin with a small safety margin,
+# without being so loose it blends in physically distinct, much-shallower
+# ripples. This is a physically-motivated choice made before re-running
+# the separability analysis, not tuned afterward to land on any
+# particular silhouette result (see Slice 13).
+#
+# Two normalization/design points found during THIS task's own
+# validation, not assumed going in:
+#   1. "Relative depth" must be measured against the deepest candidate's
+#      actual BAND DEPTH (1 - removed), not its raw continuum-removed
+#      value. Real Vesta Band II curves sit on a large, roughly-constant
+#      continuum-removed offset (~0.6-0.7, not near 0); normalizing
+#      against that offset directly (an earlier draft did this) made the
+#      tolerance far too permissive in absolute terms, pulling in 7+
+#      shallow ripple-level points spanning nearly the whole window.
+#   2. A HARD tie/no-tie cutoff at this tolerance (also tried first) does
+#      not work: under small noise, individual candidates flip in and out
+#      of the "tied" set right at the threshold boundary, and each such
+#      flip discontinuously changes which points feed the centroid --
+#      reproducing a version of the exact jumping behavior this fix is
+#      meant to eliminate, just one level removed. Replacing the hard
+#      cutoff with a smooth exponential weight (a soft-argmin / Boltzmann
+#      centroid over depth, using the same tolerance as its decay scale)
+#      removes that discontinuity by construction: every point always
+#      contributes some (possibly tiny) weight, so small input changes
+#      only ever change the output smoothly.
+BAND_CENTER_TIE_TOLERANCE = 0.03
+
+
+@dataclass
+class BandCenterResult:
+    center_um: float
+    ambiguous: bool       # True if more than one point meaningfully shares the centroid's weight
+    confidence: float     # 0..1; lower = more weight spread across competing candidates
+    n_candidates: int     # effective number of contributing points (participation ratio), rounded
+
+
+def compute_band_center_v2(
+    wavelengths: np.ndarray,
+    spectrum: np.ndarray,
+    left_um: float,
+    right_um: float,
+    tie_tolerance: float = BAND_CENTER_TIE_TOLERANCE,
+) -> Optional[BandCenterResult]:
+    """Slice 13 fix for the instability Slice 12 diagnosed in
+    compute_band_center() above (left unmodified, still available for
+    direct before/after comparison).
+
+    Slice 12's finding, restated: the real continuum-removed Band II curve
+    for HAMO/LAMO Vesta spectra routinely has several genuinely near-tied
+    local minima (differing by well under 2% relative depth), some spaced
+    ~0.2 um apart. compute_band_center() picks only the single global
+    argmin sample and fits a 3-point parabola around just that one index;
+    under realistic (0.5-2%) noise, whichever candidate happens to be
+    marginally lowest flips, so the reported center silently jumps between
+    two ~0.2 um-separated real values with no signal that a jump occurred.
+
+    Fix chosen: option (b)(ii) from the Slice 13 task -- ambiguity-aware
+    fitting with a depth-weighted centroid -- NOT option (a) (simply
+    widening the single parabola window): the competing minima are ~0.2 um
+    apart, wider than any window that could still plausibly represent one
+    physical absorption feature, so a single wider parabola would either
+    miss one tied candidate or badly misfit both at once. A full Modified
+    Gaussian Model (option c) was also not attempted: the diagnosed problem
+    is a *multi-candidate selection* instability (which of several genuine
+    local dips wins an argmin), not a poor local shape fit, so directly
+    modeling and reporting that ambiguity is the most targeted fix, without
+    a full band-shape optimizer's added implementation/convergence risk.
+
+    Implementation note: an earlier draft of this function used a hard
+    tie/no-tie cutoff (candidate either "in" or "out" of a discrete group,
+    then averaged). Validating that draft against Slice 12's own
+    perturbation test (required by this task before finalizing anything)
+    showed it reproduces a version of the same jumping behavior it was
+    meant to fix, because small noise flips candidates across the hard
+    boundary. This function instead computes a SMOOTH (soft-argmin /
+    Boltzmann) depth-weighted centroid over every valid point in the
+    window: weight decays exponentially with how much shallower a point is
+    than the deepest one, scaled by `tie_tolerance` x the deepest point's
+    own band depth. No point is ever hard-included or hard-excluded, so the
+    output changes continuously as the input changes continuously -- which
+    is the actual property step 3a's perturbation test requires.
+
+    Ambiguity/confidence come from the participation ratio of the weights
+    (Inverse Simpson index: sum(w)^2 / sum(w^2)) -- 1.0 when effectively
+    one point carries all the weight, growing toward the number of
+    near-equally-weighted competing points otherwise.
+
+    Returns None under the same "nothing usable" conditions as
+    compute_band_center() (too few valid points, all-NaN, NaN shoulders).
+    """
+    mask = (wavelengths >= left_um) & (wavelengths <= right_um)
+    w = wavelengths[mask]
+    s = spectrum[mask]
+    if len(w) < 3 or np.all(np.isnan(s)):
+        return None
+    r_left, r_right = s[0], s[-1]
+    if np.isnan(r_left) or np.isnan(r_right):
+        return None
+    continuum = r_left + (w - w[0]) / (w[-1] - w[0]) * (r_right - r_left)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        removed = np.where(continuum > 0, s / continuum, np.nan)
+
+    valid_idx = np.where(~np.isnan(removed))[0]
+    if len(valid_idx) < 3:
+        return None
+    valid_set = set(int(v) for v in valid_idx)
+
+    def fit_vertex(i: int) -> float:
+        if i == 0 or i == len(removed) - 1:
+            return float(w[i])
+        x0, x1, x2 = w[i - 1], w[i], w[i + 1]
+        y0, y1, y2 = removed[i - 1], removed[i], removed[i + 1]
+        denom = (x0 - x1) * (x0 - x2) * (x1 - x2)
+        if denom == 0 or np.isnan(y0) or np.isnan(y2):
+            return float(x1)
+        a = (x2 * (y1 - y0) + x1 * (y0 - y2) + x0 * (y2 - y1)) / denom
+        b = (x2 * x2 * (y0 - y1) + x1 * x1 * (y2 - y0) + x0 * x0 * (y1 - y2)) / denom
+        if a == 0:
+            return float(x1)
+        vertex = -b / (2 * a)
+        if not (x0 <= vertex <= x2):
+            return float(x1)
+        return float(vertex)
+
+    # Restrict candidates to genuine, discrete interior local minima (not
+    # every valid sample) -- this is what tells apart "one real, broad
+    # absorption feature" (which has exactly one local minimum, however
+    # wide) from "several genuinely competing dips" (multiple local
+    # minima). A version of this function that instead weighted every
+    # sample in the window by depth (tried, and rejected, during this
+    # task's own validation) flagged ANY sufficiently broad single feature
+    # as ambiguous too, just because several neighboring samples near one
+    # smooth trough's bottom are close in depth -- that fails the required
+    # single-minimum correctness check (a real, unambiguous absorption
+    # feature must not get flagged ambiguous just for being broad).
+    local_minima_idx = [
+        int(i) for i in valid_idx
+        if 0 < i < len(removed) - 1
+        and (i - 1) in valid_set and (i + 1) in valid_set
+        and removed[i] < removed[i - 1] and removed[i] < removed[i + 1]
+    ]
+
+    if not local_minima_idx:
+        # Monotonic curve, or the minimum sits at a window edge -- nothing
+        # to be ambiguous about.
+        i = int(valid_idx[np.nanargmin(removed[valid_idx])])
+        return BandCenterResult(fit_vertex(i), False, 1.0, 1)
+
+    if len(local_minima_idx) == 1:
+        i = local_minima_idx[0]
+        return BandCenterResult(fit_vertex(i), False, 1.0, 1)
+
+    # Multiple genuine local minima: fit each one's own sub-pixel vertex,
+    # then combine them with a SMOOTH (soft-argmin / Boltzmann) depth
+    # weighting -- not a hard tie/no-tie cutoff. A hard-cutoff version was
+    # tried first and rejected during this task's own validation: under
+    # small noise, individual candidates flip in and out of the "tied" set
+    # right at the threshold boundary, and each flip discontinuously
+    # changes which candidates feed the average -- reproducing a version
+    # of the exact jumping behavior this fix exists to eliminate. The
+    # smooth weight below has no such boundary: every candidate always
+    # contributes some (possibly tiny) amount, so small changes in which
+    # candidate is deepest only ever change the output smoothly.
+    depths = {i: float(removed[i]) for i in local_minima_idx}
+    global_min_removed = min(depths.values())
+    band_depth_global = 1.0 - global_min_removed  # deepest candidate's own band depth below the continuum
+
+    if band_depth_global <= 0:
+        # No real absorption feature (continuum-removed values at/above
+        # 1.0 even at the "deepest" candidate) -- nothing to weight by
+        # depth; just report the raw global minimum's fit.
+        i = min(depths, key=depths.get)
+        return BandCenterResult(fit_vertex(i), False, 1.0, 1)
+
+    tau = tie_tolerance * band_depth_global
+    candidate_idx = local_minima_idx
+    candidate_vertices = np.array([fit_vertex(i) for i in candidate_idx])
+    candidate_depths = np.array([depths[i] for i in candidate_idx])
+    rel_shortfall = (candidate_depths - global_min_removed) / tau
+    weights = np.exp(-rel_shortfall)  # 1.0 at the deepest candidate, decaying for shallower ones
+
+    sum_w = float(np.sum(weights))
+    sum_w2 = float(np.sum(weights ** 2))
+    centroid = float(np.sum(weights * candidate_vertices) / sum_w)
+    eff_n = (sum_w * sum_w) / sum_w2 if sum_w2 > 0 else 1.0
+
+    ambiguous = eff_n > 1.5  # meaningfully more than one candidate sharing the weight
+    confidence = float(max(0.0, min(1.0, 1.0 / eff_n)))
+    return BandCenterResult(centroid, ambiguous, confidence, int(round(eff_n)))
+
+
 def _classify_by_thresholds(center_um: float, thresholds: dict) -> str:
     for label, (lo, hi) in thresholds.items():
         if lo <= center_um < hi:

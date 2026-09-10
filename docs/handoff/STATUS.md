@@ -582,3 +582,119 @@ below). No labeling or class assignment attempted.
 
 **Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
 `git log` on this branch — "Month 1 Slice 12"), pushed: yes.
+
+---
+
+## Session 6 — 2026-09-10
+
+**Task attempted:** Fix the instability Slice 12 diagnosed in
+`compute_band_center()`. Diagnosis-to-fix, not labeling. Per explicit
+scope: `ml/data/spatial_alignment.py`, `ml/utils/splits.py`, the
+specificity penalty, and `ml/data/pds_acquisition.py` off-limits
+(confirmed untouched below); `compute_band_center()` itself also left
+completely unmodified — the fix is a new function,
+`compute_band_center_v2()`, added alongside it. No labeling or class
+assignment attempted with the new method's output.
+
+**What actually changed:**
+
+- `ml/data/spectral_labeling.py` — added `BandCenterResult` dataclass,
+  `BAND_CENTER_TIE_TOLERANCE` constant, and `compute_band_center_v2()`.
+  `compute_band_center()` itself is byte-for-byte unchanged (confirmed:
+  `git diff` on this file contains zero deleted lines).
+- `scripts/audit_band_separability_v2.py` — new file, reuses
+  `pair_observations_by_clock()` from the original (untouched) script,
+  swaps in `compute_band_center_v2()` for the center-wavelength fit.
+- `tests/test_spectral_labeling.py` — new file, 6 regression tests.
+- `docs/month1_log.md` — new "Slice 13" section.
+- This entry.
+
+**Real results:**
+
+- **Fix chosen**: ambiguity-aware fitting with a smooth (soft-argmin),
+  depth-weighted centroid across genuine near-tied local minima — not a
+  wider single-parabola window (competing minima are ~0.2 μm apart, too
+  far apart for one window to represent), not a full Modified Gaussian
+  Model (the diagnosed problem is a *selection* instability between
+  several genuine local dips, not a poor local shape fit).
+- **Two design corrections found and fixed during this session's own
+  validation** (not assumed going in): (1) an early draft normalized
+  "relative depth" against a candidate's raw continuum-removed value,
+  which — because real Vesta curves sit on a large ~0.6-0.7 offset —
+  made the tie tolerance far too permissive (pulled in 7+ shallow
+  ripple-level points); fixed by normalizing against the deepest
+  candidate's own band depth instead. (2) An early draft used a hard
+  tie/no-tie cutoff, which itself reproduced a version of the diagnosed
+  jumping (candidates flip across the hard boundary under noise); fixed
+  by replacing it with a smooth exponential weight with no hard boundary,
+  restricted to genuine discrete local minima (not every sample — that
+  version flagged any broad single real feature as "ambiguous" too,
+  failing the required single-minimum correctness check).
+- **Perturbation test (clock 370705798)**: old method's spread jumps to
+  its ~0.21 μm plateau almost immediately (0.1%→0.5% noise) and stays
+  flat there through 5% noise. v2's spread grows smoothly and
+  monotonically instead: 0.009 → 0.043 → 0.079 → 0.114 → 0.152 μm across
+  0.1%/0.5%/1%/2%/5% noise — no discrete jump at any level tested.
+- **Correctness check**: on a clean synthetic single-minimum feature (no
+  near-ties), v2 matched the old method's output to within 1e-6 μm,
+  `ambiguous=False`, `confidence=1.0` — the fix doesn't change behavior
+  on genuinely unambiguous features.
+- **Full real dataset (23 observations: 15 HAMO + 8 LAMO, same manifests
+  as Slices 10/11, no new downloads)**: all 23 of 23 flag
+  `band_ii_ambiguous=True` (and all 23 also flag `band_i_ambiguous=True`)
+  — the instability is not a few edge cases, it is universal in this
+  dataset under a properly-normalized ambiguity test. New Band II
+  centers ranged 2.0016-2.0782 μm, notably *between* the two original
+  clusters (~1.957/~2.164 μm), not on either one.
+- **Silhouette re-run, same real data**: HAMO-only (n=15) 0.590/0.621/0.588
+  (was 0.9982/0.9058/0.7234). LAMO-only (n=8) 0.607/0.669/0.468 (was
+  0.8740/0.6175/0.5192). Combined n=23 (no old baseline for this exact
+  split): 0.538/0.581/0.551. A substantial drop, reported exactly as
+  measured — not a total collapse to near-zero (no real structure) and
+  not a survival of near-perfect separation either.
+- **Verdict written into `docs/month1_log.md`, Slice 13**: Slice 12's
+  diagnosis is substantially confirmed, not fully resolved into either
+  extreme — most of the original near-perfect separation looks like the
+  diagnosed artifact, but real (moderate) clustering signal persists in
+  the 0.47-0.67 range, and this task does not determine what's behind it.
+
+**Verified how:**
+
+- The perturbation test and correctness check both ran the real,
+  unmodified `compute_band_center_v2()` (and, for comparison,
+  `compute_band_center()`) against synthetic and real data, not asserted.
+- `scripts/audit_band_separability_v2.py` was actually run against the
+  real, on-disk `datasets/metadata/sample_metadata.csv` (no new
+  downloads) — real output captured above, not estimated.
+- `git diff --stat` confirmed zero changes to
+  `ml/data/spatial_alignment.py`, `ml/utils/splits.py`, and
+  `ml/data/pds_acquisition.py`; `git diff` on `spectral_labeling.py`
+  confirmed zero deleted lines (pure addition, `compute_band_center()`
+  untouched).
+- `python -m pytest tests/ -q`: 39/39 passing (33 previous + 6 new
+  regression tests added this session).
+
+**Open issues / blockers:**
+
+- **Go/no-go: still not ready for labeling.** A moderate (not clean, not
+  absent) clustering signal now exists in properly-fitted (Band I, Band
+  II) space, with every single observation flagged as carrying real
+  ambiguity in its own right. A follow-up task would need to decide how
+  to use `confidence`/`ambiguous` per-sample (propagate as a weight?
+  exclude low-confidence samples? something else?) before any labeling
+  decision — not decided or recommended here.
+- `BAND_CENTER_TIE_TOLERANCE` (0.03) was chosen by physical reasoning
+  (matching Slice 12's measured <2% real ties, before this session's
+  silhouette numbers were known) and not tuned afterward — but it also
+  was not independently validated against VIR's actual documented
+  instrument-noise specs, only against this session's own illustrative
+  Gaussian/uniform-shift perturbation models. A full Modified Gaussian
+  Model fit (option (c) from this task) was not attempted.
+- Both Band I and Band II now use `compute_band_center_v2()` in
+  `audit_band_separability_v2.py`, for internal consistency of the
+  re-run dataset — Slice 12 only directly diagnosed the instability via
+  Band II data, so this is a reasonable but not independently
+  re-validated extension to Band I.
+
+**Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
+`git log` on this branch — "Month 1 Slice 13"), pushed: yes.
