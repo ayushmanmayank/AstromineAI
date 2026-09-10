@@ -1478,3 +1478,201 @@ assumed away:
    any further incremental acquisition pulls — repeated partial pulls
    will keep re-appending duplicates otherwise, and the workaround here
    (post-hoc file dedup) is not something to keep repeating by hand.
+
+---
+
+## Slice 10: VIR spectral diversity audit (Part 1) + quantitative rigor additions
+
+Real question: do the real VIR spectra behind the 743 Slice-9 survivors
+show genuine, defensible compositional separation — not "does a scatter
+plot look clustered." `ml/data/spectral_labeling.py`,
+`ml/data/spatial_alignment.py`, `ml/utils/splits.py` — logic not
+modified; new read-only script
+[`scripts/audit_band_separability.py`](../scripts/audit_band_separability.py)
+reuses their already-tested extraction functions and generic PDS3
+scalar-field parser rather than re-implementing either.
+
+### A structural correction before any numbers: 30 products = 15 observations
+
+The 743 survivors resolve to **30 unique VIR product IDs** — but VIR's
+VIS channel only covers Band I (~0.9-1.0 μm) and the IR channel only
+covers Band II (~1.9-2.0 μm) — see `spectral_labeling.py`'s module
+docstring, Slice 3. A real (Band I center, Band II center) 2D point per
+*observation* needs both channels for the *same* observation, matched by
+their shared `SPACECRAFT_CLOCK_START_COUNT` suffix (e.g.
+`VIR_VIS_1B_1_370617178` + `VIR_IR_1B_1_370617178`). Checked directly:
+**all 30 products pair cleanly into exactly 15 VIS+IR observations, with
+zero unpaired singletons.** The diversity question is therefore about 15
+real observations, not "30 spectra" — stated precisely here rather than
+carried forward as an imprecise headline number.
+
+### Part 1 — real Band I/II extraction, all 15 observations usable
+
+```
+python scripts/audit_band_separability.py
+```
+
+All 15 paired observations passed both channels' depth-floor gate (the
+same `BAND_I_DEPTH_FLOOR`/`BAND_II_DEPTH_FLOOR` = 0.02 gate
+`classify_spectrum()` itself uses) — **15/15 usable, 0 excluded.** Real
+extracted values:
+
+| clock (obs id) | Band I center (μm) | Band II center (μm) |
+|---|---|---|
+| 370617178 | 0.9212 | 1.9573 |
+| 370617777 | 0.9212 | 1.9573 |
+| 370618360 | 0.9212 | 1.9573 |
+| 370618943 | 0.9212 | 1.9573 |
+| 370661407 | 0.9218 | 2.1643 |
+| 370662006 | 0.9218 | 2.1641 |
+| 370662589 | 0.9217 | 2.1642 |
+| 370663172 | 0.9218 | 2.1641 |
+| 370705798 | 0.9219 | 1.9572 |
+| 370706397 | 0.9219 | 1.9572 |
+| 370706980 | 0.9218 | 1.9572 |
+| 370707563 | 0.9219 | 1.9572 |
+| 370749809 | 0.9220 | 1.9575 |
+| 370750408 | 0.9221 | 2.1640 |
+| 370750991 | 0.9219 | 2.1639 |
+
+**Visual pattern**: Band I center is essentially flat across all 15
+(0.9212–0.9221 μm, a ~0.001 μm spread — far narrower than the
+~0.90–0.95 μm range HED literature associates with diogenite-to-eucrite
+variation; see Slice 3). **Band II center is clearly bimodal**: 9
+observations cluster near 1.957 μm, 6 near 2.164 μm — a real, substantial
+~0.2 μm separation, an order of magnitude larger than Band I's entire
+spread. Whatever diversity this sample shows is carried almost entirely
+by Band II, not Band I.
+
+### Addendum 1 — quantitative separability check
+
+Silhouette scores (`sklearn.cluster.KMeans`, `random_state=42`,
+`sklearn.metrics.silhouette_score`), all three k reported, not
+cherry-picked:
+
+| k | silhouette score |
+|---|---|
+| 2 | **0.9982** |
+| 3 | 0.9058 |
+| 4 | 0.7234 |
+
+k=2 is about as clean a silhouette score as clustering analysis
+produces. **Read plainly: this does NOT mean "confirmed 2-class
+composition" — it means the 15 points fall into two extremely tight,
+well-separated groups in (Band I, Band II) space, driven almost entirely
+by the Band II bimodality above.** Whether that separation reflects real
+compositional difference or something else is exactly what the confound
+check below has to settle, precisely because the statistical separation
+itself is not in question — its cause is.
+
+### Addendum 2 — confound check: geography, illumination, and time
+
+Pulled real `INCIDENCE_ANGLE`, `EMISSION_ANGLE`, `PHASE_ANGLE`,
+`CENTER_LATITUDE`, `CENTER_LONGITUDE`, and `START_TIME` from each
+observation's VIS `.LBL` (via the same generic scalar parser
+`ml/data/spatial_alignment.py` already uses — read-only reuse, not a
+modification) and compared across the k=2 clustering (the coarsest,
+most conservative split to confound-check):
+
+**Illumination angles — ranges overlap substantially, not a confound:**
+
+| cluster (n) | incidence (min/med/max) | emission (min/med/max) | phase (min/med/max) |
+|---|---|---|---|
+| 0 (6, Band II≈2.164) | 29.68 / 30.95 / 31.92 | 7.24 / 9.08 / 10.66 | 30.19 / 31.45 / 33.80 |
+| 1 (9, Band II≈1.957) | 27.87 / 28.77 / 32.35 | 6.24 / 9.70 / 12.27 | 30.13 / 31.59 / 34.08 |
+
+Medians differ by ~1-2 degrees on each axis, well inside each cluster's
+own range — **no separation here.** Illumination/viewing geometry is not
+the driver.
+
+**Ground location — ranges overlap substantially, not a confound:**
+
+| cluster (n) | latitude (min/med/max) | longitude (min/med/max) |
+|---|---|---|
+| 0 (6) | -27.68 / -20.48 / -13.65 | 95.98 / 304.81 / 333.00 |
+| 1 (9) | -29.04 / -19.75 / -13.16 | 46.95 / 118.55 / 222.11 |
+
+Latitude medians are nearly identical (-20.5° vs -19.8°). Longitude
+spans a wide, overlapping range in **both** clusters (cluster 0's
+95.98° falls inside cluster 1's 46.95–222.11° range) — **the two
+spectral clusters are not two fixed geographic patches.** This rules out
+"the classes are just two different regions of Vesta" as the explanation.
+
+**Acquisition time — strongly correlated, not perfectly, and this is the
+real open question:**
+
+```
+cluster 0 (Band II≈2.164): 2011-09-30T13:29-13:58, 2011-10-01T14:12-14:22   (all "~13:30-14:30" block)
+cluster 1 (Band II≈1.957): 2011-09-30T01:11-01:41, 2011-10-01T01:48-02:18, 2011-10-01T14:02   (mostly "~01:00-02:20" block, ONE exception at 14:02)
+```
+
+14 of 15 observations split cleanly by which ~1-hour acquisition window
+they fall in (an early-morning block vs. a early-afternoon block,
+recurring on both Sept 30 and Oct 1 — consistent with repeated orbital
+passes at similar local times) — but the 15th (`2011-10-01T14:02:22`)
+breaks the pattern, landing in the "morning" spectral cluster despite an
+afternoon timestamp. That one exception means this is **not** a perfect
+time confound (the task's example of "cluster membership perfectly
+tracks acquisition day" does not literally hold here) — but a 14/15
+correlation this strong, combined with geography and illumination both
+ruled out above, is not nothing either.
+
+**Honest conclusion, stated plainly per the task's own standard**: the
+Band II-driven 2-cluster split is **strongly confounded with acquisition
+time/session** (which acquisition block within the day, not which day,
+and not geography or illumination angle) in 14 of 15 real observations.
+This dataset — 15 points from a single 1-week HAMO cycle — **cannot on
+its own distinguish "genuine compositional signal that happens to
+correlate with which orbital pass observed it" from "an unidentified
+time/session-linked instrumental or environmental effect that has
+nothing to do with composition."** Composition and acquisition-session
+are not separable with the data collected so far. This is reported as
+the real, load-bearing finding of this audit — not a footnote, and not
+resolved by asserting either explanation is correct.
+
+### Bottom line for the diversity question
+
+A near-perfect silhouette score (0.9982) does **not** mean this sample
+supports a confident 2-class label assignment. It means two extremely
+tight groups exist in (Band I, Band II) space, and the honest confound
+check above cannot rule out that the grouping is actually acquisition
+-session rather than mineralogy. **Quantitative clustering does not, by
+itself, support proceeding to a confident compositional class
+assignment on this 15-observation sample** — exactly the outcome this
+addendum's instructions anticipated as a legitimate, reportable result
+rather than something to iterate past.
+
+### Addendum 3 — split-leakage constraint (documented now, not implemented)
+
+**743 crops derive from only 30 unique VIR spectra (median 24.5 crops
+per spectrum; min 8, max 32 — real distribution, computed from
+`datasets/metadata/sample_metadata.csv`). Any future train/val/test
+split MUST group by spectrum product ID, not by crop/region_id —
+splitting at the crop level would put near-duplicate crops of the same
+real spectrum into both train and test, leaking label information and
+inflating apparent model accuracy in a way that would not reflect real
+generalization. The existing region-based spatial clustering in
+`assign_region_based_splits()` is NOT sufficient by itself for this
+dataset's structure and must be extended to guarantee this grouping
+before Month 2 model training begins.**
+
+Not implemented here — `ml/utils/splits.py` was not modified beyond a
+one-line comment cross-referencing this section (see that file). This is
+a documented constraint for the next task that touches splits, per this
+addendum's explicit instruction.
+
+### Go/no-go (unchanged in kind, sharpened in reason)
+
+Still not ready to proceed to compositional labeling on this sample —
+not because N is too small in a generic sense (Slice 9 already
+established real volume exists), but because the specific 15-observation
+diversity check available right now cannot separate real composition
+from a real, identified confound (acquisition session). Two concrete
+next steps, not mutually exclusive: (1) pull VIR pairs from additional
+HAMO cycles (2-6) or a different mission phase so acquisition-session and
+composition are no longer perfectly correlated in the combined sample,
+which is the only way this specific confound gets resolved; (2) revisit
+Band I's near-total flatness — if literature Band I variation requires a
+Ca-pyroxene range this 1-week, 15-observation sample simply doesn't
+span, that's a volume/coverage problem Addendum's silhouette check
+correctly surfaced rather than masked.

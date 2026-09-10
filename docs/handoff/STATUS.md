@@ -222,3 +222,134 @@ real candidate pairs. Deduplicated the two manifest files by
 **Branch/commit:** `month1-data-pipeline`, this entry's own commit
 (see `git log` on this branch — "Month 1 Slice 9: scale up acquisition
 — 743 real survivors (up from 1)"), pushed: yes.
+
+---
+
+## Session 3 — 2026-09-10 — this entry's own commit (see `git log`, "Month 1 Slice 10")
+
+**Task attempted:** VIR spectral diversity audit on the 743 Slice-9
+survivors' underlying VIR spectra (Part 1), plus a required addendum
+raising the evidentiary bar: a quantitative separability check
+(silhouette scores, not just a scatter plot), a confound check (ruling
+out geography/illumination/time as spurious drivers of any apparent
+grouping before trusting it), and a documented (not yet implemented)
+split-leakage constraint for `ml/utils/splits.py`. Note: no prior
+"Slice 10" or "Session 3" existed anywhere in this repo before this
+session — verified via `git log` and `grep` over `month1_log.md`/
+`STATUS.md` before starting; the implied prerequisite ("the main audit
+task," a scatter plot of the 30 spectra) was built for real in this
+session rather than assumed to already exist.
+
+**What actually changed:**
+- New `scripts/audit_band_separability.py` — real, re-runnable, read-only
+  with respect to every `ml/` module (reuses
+  `ml.data.spectral_labeling`'s already-tested QUBE reader/band-depth/
+  band-center functions and `ml.data.spatial_alignment`'s generic PDS3
+  scalar-field parser rather than reimplementing either).
+- `ml/utils/splits.py`: **one docstring paragraph added, no logic
+  changed** — a TODO cross-referencing this session's split-leakage
+  finding for whoever next touches `assign_region_based_splits()`.
+  Confirmed via `python -m pytest tests/ -q` (33/33, unchanged) that
+  this was a documentation-only change.
+- `docs/month1_log.md`: new "Slice 10" section (structural correction on
+  30 products vs. 15 real observations, the real Band I/II table, the
+  silhouette results for k=2/3/4, the full confound check, and the
+  split-leakage note verbatim).
+
+**Real results:**
+- **30 unique VIR products (from Slice 9's 743 survivors) pair cleanly
+  into exactly 15 real observations** (VIS+IR matched by shared
+  `SPACECRAFT_CLOCK_START_COUNT`), zero unpaired singletons. The
+  diversity question is about 15 observations, not "30 spectra" — this
+  addendum's own framing used the higher, imprecise number, corrected
+  here.
+- **15/15 observations passed both bands' depth-floor gate** — 100%
+  usable, 0 excluded from the 2D (Band I, Band II) analysis.
+- **Band I center is nearly flat across all 15**: 0.9212–0.9221 μm (a
+  ~0.001 μm spread). **Band II center is clearly bimodal**: 9 near
+  1.957 μm, 6 near 2.164 μm (~0.2 μm separation, ~200x Band I's spread).
+- **Silhouette scores** (KMeans, `random_state=42`): k=2 **0.9982**,
+  k=3 0.9058, k=4 0.7234 — all three reported, not cherry-picked.
+- **Confound check**: illumination angles (incidence/emission/phase)
+  overlap substantially between the two k=2 clusters — not a confound.
+  Ground location (latitude/longitude) also overlaps substantially
+  between clusters (longitude spans 96–333° in one cluster and 47–222°
+  in the other, clearly overlapping; latitude medians nearly identical,
+  -20.5° vs -19.8°) — **not two fixed geographic regions**, ruling that
+  out as the explanation. **Acquisition time/session is strongly
+  correlated with cluster membership in 14 of 15 observations** (an
+  early-morning acquisition block vs. an early-afternoon block,
+  recurring across two different calendar days), with exactly one real
+  exception — a strong but not perfect confound, reported as the
+  genuine open question this audit surfaces, not resolved either way.
+- **Bottom line, stated plainly**: a near-perfect silhouette score does
+  NOT mean this sample supports a confident class assignment — this
+  15-observation sample cannot separate genuine compositional signal
+  from a real, identified acquisition-session confound. Quantitative
+  clustering does not support proceeding to labeling on this specific
+  sample.
+- **Split-leakage note (verbatim in month1_log.md and cross-referenced
+  in splits.py)**: 743 crops / 30 spectra, median 24.5 crops per
+  spectrum (real number, min 8, max 32) — future splits must group by
+  `spectrum_product_id`, not region/crop, or label information leaks
+  across train/test. Not implemented this session, per explicit
+  instruction.
+
+**Verified how:**
+- `git log --oneline` and `grep -n "Slice 10\|Session 3"` over both log
+  files, run before starting, to confirm no prior work existed to build
+  on or risk duplicating.
+- Directly inspected `datasets/metadata/sample_metadata.csv` with pandas
+  to confirm the 30-unique-product / 15-unique-observation pairing
+  (grouped by regex-extracted clock-count suffix, checked 0 unpaired)
+  before writing any extraction code around that assumption.
+- Directly checked `ProductGeometry`'s actual field list in
+  `ml/data/spatial_alignment.py` (source read, not assumed) and found it
+  does NOT include `INCIDENCE_ANGLE`/`EMISSION_ANGLE`/`PHASE_ANGLE` —
+  contrary to what this session's task description claimed; parsed
+  those three fields directly in the new script instead, reusing only
+  the existing generic scalar-parsing helpers, and confirmed by grep
+  that a real downloaded label actually has them populated
+  (non-`"N/A"`) before relying on them.
+  Also pulled `CENTER_LATITUDE`/`CENTER_LONGITUDE` (not requested by
+  the task, but essentially free with the same parser and directly
+  decisive for the geography-confound question) and confirmed those
+  fields are present in a real label before using them.
+- Ran `python scripts/audit_band_separability.py` and read its real,
+  printed output directly (no post-processing or rounding of the
+  printed table/scores before transcribing into `month1_log.md`).
+  Re-ran it after adding the location-confound check to confirm the
+  silhouette numbers were unchanged (they were — that addition only
+  changed what gets printed for the confound section, not the
+  clustering inputs).
+- `python -m pytest tests/ -q`: 33/33 passing after the `splits.py`
+  docstring addition (confirms it's documentation-only, no behavior
+  change).
+
+**Open issues / blockers:**
+- **Go/no-go for labeling: still not ready** — same conclusion in kind
+  as before Slice 9 fixed the volume problem, but for a different,
+  sharper reason now: volume exists (Slice 9), but this specific
+  15-observation sample can't separate composition from an
+  acquisition-session confound. Two concrete next steps recorded in
+  `month1_log.md`: pull VIR pairs from additional HAMO cycles (2-6) or
+  another phase so session and composition stop being perfectly
+  correlated in the combined sample; and note that Band I's near-total
+  flatness may itself reflect a coverage limitation (this single
+  1-week window may not span enough real Ca-pyroxene variation for
+  Band I to move at all), which is a volume problem the silhouette
+  check surfaced rather than masked.
+- **Split-leakage fix not implemented** (deliberately, per this
+  session's explicit instruction) — `assign_region_based_splits()`
+  still needs to be extended to group by `spectrum_product_id` before
+  any real Month 2 training split is cut. Flagged in both
+  `month1_log.md` and a `splits.py` code comment for whoever picks this
+  up.
+- This session ran on top of unrelated same-session work (installing
+  and running the third-party `graphify` tool via its own CLI, unrelated
+  to AstromineAI) — mentioned here only because it means this session's
+  chat history is not a clean single-topic record; nothing from that
+  work touched this repo's tracked files.
+
+**Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
+`git log` on this branch — "Month 1 Slice 10"), pushed: yes.

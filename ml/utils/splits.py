@@ -11,6 +11,15 @@ recognize a specific patch of terrain rather than compositional signal.
 This module only assigns `.split` on SampleMetadata records already
 produced by spatial_alignment.py — it does not touch spatial alignment,
 labeling, or acquisition.
+
+TODO (see docs/month1_log.md, Slice 10, Addendum 3): 743 real crops
+derive from only 30 unique VIR spectra (median 24.5 crops/spectrum) —
+spatial region-grouping alone does NOT guarantee crops of the same
+spectrum stay in one split, since one spectrum's footprint can overlap
+many spatially-distinct FC frames across a region. Before Month 2
+training begins, assign_region_based_splits() must be extended to also
+group by spectrum_product_id (not just spatial region), or a crop-level
+split will leak the same real spectrum's label across train and test.
 """
 
 from __future__ import annotations
