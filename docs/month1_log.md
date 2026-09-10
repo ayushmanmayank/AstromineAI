@@ -1355,3 +1355,126 @@ possibly more cycles) using the now-fully-validated alignment pipeline
 unchanged — not further debugging of the alignment math, which has now
 been checked and calibrated against real data three times over (Slices
 6, 7, 8).
+
+---
+
+## Slice 9: Scale up acquisition within `hamo_cycle1` — real volume test
+
+Task: pull substantially more real FC/VIR data from the already-verified
+`hamo_cycle1` window and re-run the unmodified, already-calibrated
+alignment pipeline, to find out whether N=1 (Slice 8) was a sampling
+artifact or a genuine scarcity. `ml/data/spatial_alignment.py` (longitude
+standardization, specificity penalty), `ml/utils/splits.py` — not
+touched, per scope.
+
+### Acquisition
+
+- Pulled **all** real VIR products in the `hamo_cycle1` window (no
+  `--limit`): 80 real primary cubes (40 IR + 40 VIS) — this is the full
+  real count for the window, not a subset.
+- Attempted a full, unbounded FC pull (5080 rows) in the background;
+  killed it after confirming the real download rate (~4.6s/product,
+  including both `.LBL` and `.FIT`) made completing all 5080 impractical
+  within this session (~6+ hours). Restarted bounded at `--limit 1000`
+  (within this task's own suggested 1000-2000 range) instead — a
+  deliberate, disclosed scope reduction, not a silent one.
+- The bounded 1000-frame pull genuinely completed, but 3 products failed
+  with transient network errors (connection reset, read timeout, one DNS
+  resolution blip) — retried the same command (skip-if-exists makes this
+  cheap) and got a clean 1000/1000 on the second attempt.
+
+### An unplanned, real bug found and fixed (data only, not the acquisition code)
+
+Checking the resulting FC manifest before trusting any alignment number
+revealed **`pds_acquisition.py`'s `_write_manifest()` appends every run's
+full product list to `manifest.jsonl` without deduplicating** — across
+this session's several acquisition calls (plus everything accumulated in
+earlier sessions), the FC manifest held **2200 entries for only 1010
+unique products** (every product duplicated at least once, several 4x);
+the VIR manifest held 180 entries for 120 unique products. Running
+alignment against the undeduplicated manifest first (before catching
+this) produced a **2179-survivor** result that would have been badly
+inflated by scoring the same real candidate pairs multiple times as if
+they were independent — not reported as the real result below.
+
+**Fixed by deduplicating the two manifest files** (by `product_id`,
+keeping the downloaded record for each) — a data-hygiene operation on
+the output artifact, not a code change to `pds_acquisition.py` itself
+(left untouched, per this task's scope). `_write_manifest()`'s
+append-without-dedup behavior is a real latent bug that will recur on
+every future incremental pull and should get a proper code fix (e.g.
+dedup-on-write, or rebuild-from-scratch each run) in a dedicated future
+pass — flagged here, not silently patched into the protected file.
+
+Deduplicated result: FC manifest 2200 → 1010 records (1010 downloaded);
+VIR manifest 180 → 120 records (120 downloaded).
+
+### Real alignment result, on the deduplicated data
+
+Command:
+```
+python -m ml.data.spatial_alignment -v
+```
+Result:
+```
+Loaded 1010 downloaded FC image products and 120 downloaded VIR spectrum products from manifests
+Loaded geometry for 1010/1010 FC images (1000 with usable footprint) and 120/120 VIR spectra (112 with usable footprint)
+Alignment: 25158 FC x 24 VIR candidates fell inside the 24.0h time window; 24918 pairs had computable overlap; 743/24918 survived confidence >= 0.30
+Done: 1010 FC images, 120 VIR spectra considered; 743 pairs survived confidence >= 0.30
+```
+
+**743 real survivors** — up from 1 (Slice 8), on roughly 5x the FC volume
+and 1.5x the VIR volume (1000 vs. 200 FC; 120 vs. ~80 unique VIR).
+Survivor rate (743/24918 ≈ 3.0% of computable candidates) is consistent
+with genuine, non-trivial spatial correspondence being common within a
+single HAMO cycle rather than a rare fluke — this reads as a real
+scarcity-vs-artifact answer: **N=1 was a sampling artifact of the small
+Slice 8 batch, not evidence that genuine correspondences are rare.**
+
+**Spot-checked, not just counted:**
+- `datasets/metadata/sample_metadata.csv`: 743 rows, 743 unique
+  `region_id` values (no duplicate rows slipped through), 225 unique FC
+  images matched against 30 unique VIR spectra — a real many-to-many
+  correspondence pattern (consistent with FC's continuous nadir track
+  passing near several VIR footprints, and repeated VIR observations
+  falling near several FC passes), not one degenerate cluster.
+- `correspondence_confidence`: min 0.300, median 0.771, max 0.9996 — a
+  real spread, not everything piled at the threshold.
+- `time_delta_seconds`: min 2.9s, median 286.4s (~4.8 min), max 767.5s
+  (~12.8 min) — all comfortably inside the 24h window and physically
+  plausible for genuine close-in-time observations.
+- `spatial_iou`: min 0.114, median 0.362, max 0.547 — real, substantial
+  geometric overlap, not near-zero noise crossing the threshold only via
+  the size-ratio/time terms.
+- All 743 rows still have `label=unlabeled`, `label_source=pending`,
+  `split=unassigned` — labeling/splitting correctly not touched.
+- `datasets/processed/`: exactly 743 cropped PNGs, matching the CSV row
+  count. The very first row (`0007112__VIR_VIS_1B_1_370617178`,
+  confidence 0.3046142151856357) is byte-for-byte the same pair and
+  confidence value found in Slice 8 — confirms this larger run is a
+  superset of the earlier finding, not a divergent recomputation.
+- Full test suite: 33/33 passing throughout (no code changed this
+  slice).
+
+### Go/no-go — sample volume for proceeding to labeling
+
+**743 real, spatially-verified, plausible pairs, from only 1000 of the
+5080 available FC frames in a single HAMO cycle.** This is a real,
+substantial, and structurally sound sample: many-to-many FC/VIR matches,
+a genuine confidence/IoU/time-delta spread, full provenance on every row.
+**This is enough real volume to proceed to the labeling pass** (VIR-only
+compositional labels via `ml/data/spectral_labeling.py`, region-based
+splits via `ml/utils/splits.py`) — as a dedicated next task, not started
+here per this task's explicit scope boundary.
+
+Two things to carry into that next task, stated plainly rather than
+assumed away:
+1. **Class balance is unknown until real labeling runs** — 743 image
+   crops map to only 30 unique VIR spectra, so the compositional label
+   diversity is bounded by those 30 spectra's real Band I/II
+   measurements, not by 743. Whether that supports 2, 3, or 4 real
+   classes is a question for the labeling pass, not this one.
+2. **The manifest-deduplication bug should get a real code fix** before
+   any further incremental acquisition pulls — repeated partial pulls
+   will keep re-appending duplicates otherwise, and the workaround here
+   (post-hoc file dedup) is not something to keep repeating by hand.
