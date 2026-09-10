@@ -1907,3 +1907,144 @@ artifact — and this task does not adjudicate between them**, per its
 explicit scope: no proceeding to `ml/data/spectral_labeling.py` or class
 assignment regardless of these findings. That remains a decision point
 for a follow-up conversation.
+
+## Slice 12: testing the band-center quantization-artifact hypothesis (real data, unmodified code)
+
+**Task**: Slice 11 raised, but did not test, a third hypothesis for the
+recurring HAMO/LAMO Band II bimodality (~1.957 μm / ~2.164 μm): that it
+is a fitting/quantization artifact of `compute_band_center()` rather than
+genuine geology. This slice tests that one hypothesis, on real data,
+without modifying `ml/data/spatial_alignment.py`, `ml/utils/splits.py`,
+the specificity penalty, `ml/data/pds_acquisition.py`, or
+`compute_band_center()` itself (diagnosis only — a fix, if warranted, is
+an explicit follow-up). No labeling or class assignment attempted.
+
+**Step 1 — real IR wavelength grid.** Pulled `BAND_BIN_CENTER` (via
+`read_vir_qube()`, unmodified) for a real IR product and sliced it to
+`BAND_II_WINDOW_UM` (1.65-2.50 μm): 90 real grid points, spacing
+0.0090-0.0100 μm (mean 0.00945 μm) — i.e. genuinely ~0.0095 μm, as
+suspected. Both cluster centers sit almost exactly on real grid points:
+1.957 μm is an exact grid value; 2.165 μm is a grid value (the reported
+2.164 μm cluster center is ~0.001 μm off it, within one parabola-fit
+step). On its face, a ~0.0095 μm grid is coarse enough that this
+hypothesis is plausible, not implausible — real Band II absorption
+features on Vesta are broad (tens of nm), so this grid genuinely
+undersamples the feature's true curvature.
+
+**Step 2 — raw spectrum overlay.** Plotted real, unfitted
+`mean_spectrum` values (not fitted centers) across `BAND_II_WINDOW_UM`
+for three real comparison pairs: two within-cluster HAMO pairs
+(370705798 vs 370749809, both fit ≈1.957; 370662589 vs 370750991, both
+fit ≈2.165) and the LAMO cross-session pair (379311014 fit ≈1.957 vs
+379311261 fit ≈2.164, 4 minutes apart). Saved to
+`docs/handoff/artifacts/band_ii_raw_overlay.png`. Visually, all three
+pairs show the same overall shape (a broad, shallow, gently undulating
+decline with a shared sharp real feature near ~2.42-2.45 μm in every
+curve) offset vertically from each other — not two visibly different
+absorption-minimum shapes.
+
+**Step 3 — numeric shape comparison (not just visual).** For each of the
+6 real spectra behind these 3 pairs, computed the actual continuum-removed
+curve (identical math to `compute_band_center()`, read-only) and listed
+its lowest local minima by depth:
+
+| clock | fit result | top-4 local minima (wavelength μm, continuum-removed depth), sorted |
+|---|---|---|
+| 370705798 | 1.9572 | (1.957, 0.6275), (2.165, 0.6317), (1.995, 0.6342), (2.014, 0.6385) |
+| 370749809 | 1.9575 | (1.957, 0.5467), (1.995, 0.5562), (2.014, 0.5597), (2.165, 0.5619) |
+| 370662589 | 2.1642 | (2.165, 0.6292), (1.957, 0.6359), (2.146, 0.6395), (1.995, 0.6416) |
+| 370750991 | 2.1639 | (2.165, 0.6144), (1.957, 0.6162), (1.995, 0.6204), (2.014, 0.6236) |
+| 379311014 | 1.9574 | (1.957, 0.6088), (2.165, 0.6178), (1.995, 0.6185), (2.014, 0.6206) |
+| 379311261 | 2.1643 | (2.165, 0.6072), (1.957, 0.6089), (2.146, 0.6131), (1.995, 0.6163) |
+
+**This is the central finding.** Every one of the 6 real spectra —
+across both HAMO clusters and the LAMO cross-session pair — has the
+same set of near-tied competing local minima (1.957, 1.995, 2.014,
+2.165, sometimes 2.146 μm), differing only in the depth ranking of
+which one happens to be lowest (typically by well under 2% relative
+depth). The raw curves do not show genuinely different
+absorption-minimum shapes; they show the same underlying multi-modal
+curve shape, with whichever of ~2-4 near-degenerate candidate minima
+narrowly wins the global-minimum search reported as "the" band center.
+This directly answers step 3: it is a jumping fit output, not a
+genuinely different physical minimum position.
+
+**Step 4 — perturbation test (unmodified `compute_band_center()`, real
+spectrum, synthetic perturbations only).** Base case: clock 370705798,
+unperturbed fit = 1.95721 μm.
+
+- Sub-grid wavelength shifts (interpolating the real spectrum onto a
+  grid shifted by a fraction of the 0.0095 μm spacing, no noise): the
+  output varied smoothly, from 1.95721 μm at shift=0 up to 1.96624 μm
+  at a full grid-spacing shift — no discrete jump. This refutes the
+  narrowest version of the hypothesis (a hard vertex round-to-grid
+  snap dominating ordinary sub-pixel behavior): the parabola fit itself
+  interpolates continuously when the same local minimum keeps winning.
+- Additive Gaussian noise on the same real spectrum, 10 seeds per
+  amplitude: at 0.1% of mean signal amplitude, output stayed smoothly
+  clustered near 1.955-1.957 μm (no jump). At 0.5% amplitude, 2 of 10
+  seeds jumped to ≈2.164-2.165 μm while the rest stayed near ≈1.957 μm —
+  a discrete jump between exactly the two real cluster values, not a
+  continuum in between. At 1.0-2.0% amplitude, the jump rate rose
+  further (4-6 of 10 seeds landing in the ≈2.16 μm cluster), plus a
+  handful of intermediate excursions (e.g. 2.0121, 2.0885, 2.1464) as
+  noise grew large enough to occasionally favor other candidate minima
+  from the step-3 table. 0.5-2% noise on a real spectrum's absolute
+  values is well within realistic VIR measurement noise.
+
+**This is the decisive result**: the same real, single spectrum, given
+only realistic-amplitude random noise (no change in true underlying
+composition), reports a fitted Band II center that discretely snaps
+between the two exact values seen across independent HAMO and LAMO
+observations, rather than varying continuously. Sub-grid shifts alone
+produce smooth output; it is the global-argmin selection among several
+near-tied local minima (step 3), not simple grid-rounding, that is
+unstable — but the practical consequence is exactly the discrete,
+repeated-value behavior the artifact hypothesis predicted.
+
+**Step 5 — source inspection for snapping behavior.**
+`ml/data/spectral_labeling.py`'s `compute_band_center()` picks the
+global minimum of the continuum-removed curve via
+`i = valid_idx[np.nanargmin(removed[valid_idx])]`, then fits a parabola
+to only the 3 points immediately around that single global-argmin index.
+When several candidate minima are nearly tied (as step 3 shows is the
+norm here, not an exception), `nanargmin` deterministically picks
+whichever one is marginally lowest for that sample's noise realization —
+there is no mechanism to detect or report near-ties. Three additional
+raw-grid-value fallback paths exist and were confirmed present, though
+not the operative mechanism in this specific dataset's base (unperturbed)
+fits, since `vertex_inside_window` was `True` for all 6 real spectra
+checked in step 3:
+- edge case: `if i == 0 or i == len(removed) - 1: return float(w[i])`
+  — returns the raw, unmodified grid value with no interpolation.
+- degenerate fit: `if denom == 0 or ...: return float(x1)` — same.
+- non-parabolic fit: `if a == 0: return float(x1)` — same.
+- out-of-window vertex: `if not (x0 <= vertex <= x2): return float(x1)`
+  — silently discards the fit and returns the raw grid value whenever the
+  parabola's own vertex estimate falls outside its local 3-point window.
+
+These fallbacks are real and would compound the instability further
+(exact grid-value repeats) whenever they trigger, but the step 4
+perturbation test shows the dominant mechanism producing this dataset's
+specific bimodality is upstream of them: the global-minimum search
+itself flipping between near-degenerate candidates.
+
+**Verdict: SUPPORTED.** The band-center quantization/fitting-artifact
+hypothesis is supported by direct evidence, not merely plausible:
+(1) the real IR grid (~0.0095 μm) is coarse relative to Vesta's broad
+Band II feature; (2) all 6 real spectra checked share the same 3-4
+near-tied competing local minima rather than one distinct minimum each;
+(3) adding realistic (0.5-2%) noise to a single real spectrum, with no
+compositional change, causes `compute_band_center()`'s real, unmodified
+output to discretely jump between the exact two values recorded across
+independent HAMO and LAMO observations. This does not by itself prove
+there is no genuine compositional signal underneath — a real Band II
+shift could exist and simply be too small relative to this fitting
+method's noise sensitivity to see cleanly — but it does mean the
+observed bimodality, as currently measured, cannot be trusted as
+evidence of real composition without a more robust band-center method.
+No fix is made here (out of scope for this task); the concrete follow-up
+is to make `compute_band_center()` report a confidence/ambiguity flag
+when multiple local minima are within some tolerance of the global one
+(or to widen/smooth the fit window), then re-run the Slice 10/11 audits
+before any labeling proceeds.

@@ -486,3 +486,99 @@ labeling/class assignment regardless of findings.
 
 **Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
 `git log` on this branch — "Month 1 Slice 11"), pushed: yes.
+
+---
+
+## Session 5 — 2026-09-10
+
+**Task attempted:** Test the one new hypothesis Session 4 raised but did
+not investigate — that the recurring HAMO/LAMO Band II bimodality
+(~1.957 μm / ~2.164 μm) is a fitting/quantization artifact of
+`compute_band_center()`, not real geology. Diagnosis only, by explicit
+instruction: `ml/data/spatial_alignment.py`, `ml/utils/splits.py`, the
+specificity penalty, `ml/data/pds_acquisition.py`, and
+`compute_band_center()` itself were all off-limits (confirmed untouched
+below). No labeling or class assignment attempted.
+
+**What actually changed:**
+
+- `docs/month1_log.md` — new "Slice 12" section with the full evidence
+  chain and verdict.
+- `docs/handoff/artifacts/band_ii_raw_overlay.png` — new artifact: 3
+  stacked plots of real, unfitted `mean_spectrum` values across
+  `BAND_II_WINDOW_UM` for 2 within-cluster HAMO pairs and the LAMO
+  cross-session pair.
+- This entry.
+- No source files changed. `ml/data/spectral_labeling.py` (which holds
+  `compute_band_center()`) was read extensively but not edited.
+
+**Real results:**
+
+- Real IR grid (`BAND_BIN_CENTER`, `BAND_II_WINDOW_UM` slice): 90 points,
+  spacing 0.0090-0.0100 μm (mean 0.00945 μm) — confirms the ~0.0095 μm
+  suspicion; coarse enough, relative to Vesta's broad Band II feature,
+  that the hypothesis is plausible on its face, not ruled out by grid
+  spacing alone.
+- Numeric (not just visual) comparison of the 6 real spectra behind the
+  3 comparison pairs: all 6 share the same set of near-tied competing
+  local minima (1.957, 1.995, 2.014, 2.165, sometimes 2.146 μm) in their
+  continuum-removed curves, differing only in which one is marginally
+  lowest (typically <2% relative depth apart). The raw curves do not
+  show genuinely different absorption-minimum shapes.
+- Perturbation test on one real spectrum (clock 370705798, unmodified
+  `compute_band_center()`): sub-grid wavelength shifts alone produced
+  smooth output (1.95721 → 1.96624 μm across a full grid step, no jump).
+  Additive Gaussian noise at realistic amplitude (0.5-2% of mean signal,
+  10 seeds each) caused the reported center to discretely jump between
+  ≈1.957 μm and ≈2.164/2.165 μm — the exact two real cluster values —
+  with no compositional change to the input.
+- Source read confirmed 3 raw-grid-value fallback paths in
+  `compute_band_center()` (edge-of-window, degenerate parabola,
+  non-parabolic fit) plus a 4th, `if not (x0 <= vertex <= x2): return
+  float(x1)`, that discards the fit whenever the vertex falls outside
+  its own 3-point window — real code, but confirmed NOT the operative
+  mechanism for these 6 spectra's base fits (`vertex_inside_window` was
+  `True` in all 6); the operative mechanism is the upstream global-
+  argmin selection among near-degenerate local minima.
+- **Verdict written into `docs/month1_log.md`, Slice 12: SUPPORTED.**
+  Stated plainly with its real limitation: this does not prove there is
+  no genuine compositional signal underneath, only that the current
+  fitting method cannot be trusted to report it cleanly given its
+  demonstrated noise sensitivity.
+
+**Verified how:**
+
+- Every number above was computed directly against real QUBE data via
+  `read_vir_qube()` (unmodified) and the identical continuum-removal math
+  used inside `compute_band_center()`, not asserted.
+- The perturbation test called the real, unmodified
+  `compute_band_center()` function (imported, never edited) on real
+  spectra with synthetic shifts/noise applied only to local copies of
+  the arrays passed in.
+- `git diff --stat` confirmed zero changes to `ml/data/spatial_alignment.py`,
+  `ml/utils/splits.py`, `ml/data/pds_acquisition.py`, and
+  `ml/data/spectral_labeling.py` before committing.
+- `python -m pytest tests/ -q`: 33/33 passing (no protected/tested code
+  changed, run as a regression sanity check anyway).
+
+**Open issues / blockers:**
+
+- **Go/no-go: still not ready for labeling.** This session narrows,
+  rather than closes, the question: the quantization-artifact hypothesis
+  is now evidence-backed, but a real compositional signal could still
+  exist underneath a noise-sensitive fit — this session does not and
+  cannot distinguish "no real signal" from "real signal masked by fit
+  instability."
+  Recommended concrete follow-up (not started here, per scope): give
+  `compute_band_center()` a near-tie/ambiguity flag (or widen/smooth the
+  fit window) and re-run the Slice 10/11 separability and confound
+  checks before any labeling decision.
+- The perturbation test used one real base spectrum (370705798) and
+  synthetic noise/shift models (Gaussian, uniform sub-grid shift) — it
+  has not been repeated across all 6 spectra or validated against VIR's
+  actual documented instrument-noise characteristics, so the specific
+  jump rates (e.g. "2 of 10 seeds at 0.5%") are illustrative of the
+  mechanism, not a calibrated false-bimodality rate.
+
+**Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
+`git log` on this branch — "Month 1 Slice 12"), pushed: yes.
