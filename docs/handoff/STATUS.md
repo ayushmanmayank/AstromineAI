@@ -353,3 +353,136 @@ session rather than assumed to already exist.
 
 **Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
 `git log` on this branch — "Month 1 Slice 10"), pushed: yes.
+
+---
+
+## Session 4 — 2026-09-10 — this entry's own commit (see `git log`, "Month 1 Slice 11")
+
+**Task attempted:** Investigate Slice 10's acquisition-session confound
+via two independent tracks: (A) literature cross-check of the 15 real
+HAMO observations' lat/lon against published Dawn VIR Vesta compositional
+maps; (B) pull real LAMO-phase data (a structurally different, ~4h vs.
+HAMO's ~12h, orbital cadence) and re-run the unmodified alignment +
+separability pipeline to see if the same bimodality recurs and whether
+it tracks LAMO's own time pattern. Explicitly scoped to NOT proceed to
+labeling/class assignment regardless of findings.
+
+**What actually changed:**
+- `configs/config.yaml`: added `lamo_cycle4` to `data.mission_phases`,
+  with the *real, verified* dates (2012-01-07 to 2012-01-09) — not the
+  nominal directory-name dates, which were wrong by 8-9 days (see below).
+- `ml/data/pds_acquisition.py`: **one real bug fixed** — FC row
+  filtering now keeps only INDEX.TAB rows whose
+  `FILE_SPECIFICATION_NAME` ends in `.LBL` (this LAMO volume carries a
+  second, redundant row type per product pointing directly at the
+  `.IMG` data file, which the old code wrongly treated as a label).
+  Not on this task's do-not-touch list (`ml/data/spatial_alignment.py`,
+  `ml/utils/splits.py`, specificity penalty — none touched).
+- Real data: pulled 168 real FC LAMO products + 20 real VIR LAMO
+  products (8 real paired VIS+IR observations after clock-count
+  pairing). Manifests deduplicated again afterward (the buggy runs
+  before the fix re-introduced duplication, same failure mode as
+  Slice 9 — caught and fixed the same way).
+- `docs/month1_log.md`: new "Slice 11" section, Parts A and B, written
+  in that order (Track A finished and committed to the log before
+  Track B's acquisition started, per the task's explicit ordering).
+
+**Real results:**
+- **Track A**: all 15 real HAMO observations sit at -13° to -29°
+  latitude. The one well-established, highly-cited compositional
+  boundary in Dawn VIR literature (De Sanctis et al.) — diogenite
+  concentrated near the south pole (Rheasilvia, ~72°S), eucrite/howardite
+  toward the equator — **does not apply to this sample's latitude range
+  at all**. A finer named unit (Vestalia Terra, ~34°E) is closer to two
+  of the 15 points but is itself described as compositionally mixed at
+  the quadrangle scale, and most points are far from it regardless. Could
+  not access the actual quadrangle-level published maps (paywalled; the
+  one open-access PDF found could not be rendered in this environment —
+  no `poppler-utils`). **Honest conclusion: no usable published map at
+  these specific 15 coordinates — reported as "no match found," not
+  stretched into either direction.**
+- **Track B, real LAMO structural findings** (checked before any
+  download): HAMO ~12h orbital period vs. LAMO ~4h (Planetary Society
+  Dawn Journal, citable) — real, meaningful cadence difference. VIR's
+  LAMO cycles 1-3 are genuinely absent from the archive (nominal
+  directory 404s); VIR's real "CYCLE4" data is entirely dated 2012-01-08,
+  an 8-9 day slip from its nominal 2011-12-31 label; FC's matching real
+  window is its own *CYCLE5*, not CYCLE4 — same nominal cycle numbers,
+  different real time windows, unlike HAMO.
+- **Track B, alignment**: 787 total survivors on combined HAMO+LAMO
+  manifests (743 HAMO + 44 new from LAMO), via the unmodified
+  `align_dataset()`.
+- **Track B, separability (LAMO-only, chosen over combined — states why
+  in `month1_log.md`)**: 8 real paired observations, all usable.
+  Silhouette k=2/3/4: 0.8740 / 0.6175 / 0.5192. **Band II values landed
+  at almost exactly HAMO's same two numbers (~1.957 μm, ~2.164 μm) —
+  not just "also bimodal," numerically matching to ~0.001 μm across two
+  independent mission phases.** This is reported as a new, real, open
+  concern: possible band-center-fitting quantization artifact, not
+  previously considered, not resolved here.
+- **Track B, confound check**: 7 of 8 LAMO observations split into two
+  real sessions ~4.3h apart (matching LAMO's own orbital period) — but
+  the single "≈2.164" observation was acquired 4 minutes after, and at a
+  geographically adjacent location to, a "≈1.957" neighbor in the *same*
+  session, not a separate one. That's a real structural difference from
+  HAMO's pattern (weak evidence *against* the session-confound
+  generalizing here) — weak because n=1, and because the exact-value
+  recurrence keeps the quantization-artifact explanation equally open.
+- **Bottom line, stated in month1_log.md**: three live hypotheses remain
+  open (session confound / genuine localized composition / quantization
+  artifact); neither track resolves the question, both narrow it. No
+  labeling or class assignment attempted, per explicit scope.
+
+**Verified how:**
+- WebSearch for Track A, cross-checked across multiple independent
+  result summaries citing De Sanctis et al.'s Dawn VIR Vesta mineralogy
+  papers and Rheasilvia/Vestalia Terra coordinates (Wikipedia, sourced
+  to the IAU gazetteer); attempted direct fetch of an open-access arXiv
+  PDF and the A&A 2021 paper (both blocked — 403 on A&A via both
+  WebFetch and a browser-UA curl retry; the arXiv PDF fetched but could
+  not be rendered by the `Read` tool, `poppler-utils` missing) — reported
+  as a genuine access limitation rather than silently dropped.
+- Fetched real FC/VIR LAMO directory listings directly (`curl`, browser
+  UA) before adding anything to `config.yaml` — did not assume LAMO's
+  naming mirrored HAMO's.
+- Diagnosed the real 168/336 FC 404 failures by inspecting the actual
+  failing URLs, confirming server-side (via direct `curl` HEAD/GET
+  checks) that both a `.FIT`-under-`/DATA/FITS/` and a
+  `.IMG`-under-`/DATA/IMG/` file genuinely exist for the same product,
+  and confirming via direct INDEX.TAB inspection that every non-`.LBL`
+  row has an exact `.LBL`-row sibling for the same `PRODUCT_ID` in this
+  window (168 non-.LBL rows, 168 matching .LBL rows, 0 orphaned) before
+  writing the fix — not assumed.
+- Re-ran the fixed acquisition (168/168 downloaded, 0 failures) and
+  spot-checked one specific product's final manifest entry to confirm it
+  resolved to the correct FITS-format label+data pair, not the
+  IMG-as-label mistake.
+- `python -m pytest tests/ -q`: 33/33 passing after the
+  `pds_acquisition.py` fix.
+- Re-ran `align_dataset()` (unmodified) and read its real log output
+  directly for the 787-survivor figure.
+- Reused `scripts/audit_band_separability.py`'s own functions
+  (imported, not re-implemented) against a LAMO-only filtered copy of
+  `sample_metadata.csv` — the script file itself was not modified.
+
+**Open issues / blockers:**
+- **Go/no-go: unchanged from Session 3 — still not ready for labeling**,
+  now for an even more specific reason: three competing explanations for
+  the observed bimodality remain open, and this task's own findings
+  raised a brand-new one (quantization artifact) rather than closing any
+  existing one down. A follow-up conversation needs to decide which to
+  investigate next — this session does not recommend one over the
+  others.
+- **`ml/data/pds_acquisition.py`'s FC row-filtering fix is scoped to the
+  specific `.LBL`-vs-`.IMG` row duplication found in this LAMO volume** —
+  it has not been checked against every other phase/volume in the
+  archive, so a similar issue could in principle recur elsewhere and go
+  uncaught until it does.
+- The Track A literature search could not access the actual published
+  quadrangle-level compositional maps (paywalled + a PDF-rendering tool
+  gap in this environment) — if that access is ever available, Track A
+  should be redone with real map figures, not just search-result
+  summaries of them.
+
+**Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
+`git log` on this branch — "Month 1 Slice 11"), pushed: yes.

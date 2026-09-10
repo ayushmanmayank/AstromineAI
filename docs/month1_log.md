@@ -1676,3 +1676,234 @@ Band I's near-total flatness — if literature Band I variation requires a
 Ca-pyroxene range this 1-week, 15-observation sample simply doesn't
 span, that's a volume/coverage problem Addendum's silhouette check
 correctly surfaced rather than masked.
+
+---
+
+## Slice 11: Investigating the acquisition-session confound (two independent tracks)
+
+Scope note before either track: this task explicitly does NOT authorize
+proceeding to `ml/data/spectral_labeling.py` / class assignment
+regardless of what either track finds — both are diagnostic only.
+`ml/data/spatial_alignment.py`, `ml/utils/splits.py`, and the specificity
+penalty are not touched in this slice.
+
+One correction to this task's own premise, checked rather than assumed:
+the manifest-deduplication fix was Slice 9's finding, not "Slice 10 Part
+2" (Slice 10 was the band-separability audit; it never touched the
+manifests). Re-verified directly before relying on it for Track B: both
+`datasets/raw/{dawn_fc_vesta,dawn_vir_vesta}/manifest.jsonl` still have
+exactly one entry per unique `product_id` (1010/1010 FC, 120/120 VIR) —
+confirmed clean, no regression.
+
+### Part A — literature cross-check (done first, before any Track B download)
+
+Reused Slice 10's 15 real (Band I, Band II, cluster, `CENTER_LATITUDE`,
+`CENTER_LONGITUDE`, `START_TIME`) points directly (via
+`scripts/audit_band_separability.py`'s own functions, imported not
+re-implemented) rather than re-extracting:
+
+| cluster | clock | lat | lon | time |
+|---|---|---|---|---|
+| 0 (Band II≈2.164) | 370661407 | -13.647 | 333.001 | 2011-09-30T13:29 |
+| 0 | 370662006 | -18.374 | 321.622 | 2011-09-30T13:39 |
+| 0 | 370662589 | -23.044 | 310.430 | 2011-09-30T13:49 |
+| 0 | 370663172 | -27.684 | 299.187 | 2011-09-30T13:58 |
+| 0 | 370750408 | -17.906 | 107.195 | 2011-10-01T14:12 |
+| 0 | 370750991 | -22.578 | 95.980 | 2011-10-01T14:22 |
+| 1 (Band II≈1.957) | 370617178 | -13.627 | 80.752 | 2011-09-30T01:12 |
+| 1 | 370617777 | -18.396 | 69.423 | 2011-09-30T01:22 |
+| 1 | 370618360 | -23.041 | 58.182 | 2011-09-30T01:32 |
+| 1 | 370618943 | -27.677 | 46.950 | 2011-09-30T01:41 |
+| 1 | 370705798 | -14.989 | 222.108 | 2011-10-01T01:49 |
+| 1 | 370706397 | -19.752 | 210.771 | 2011-10-01T01:59 |
+| 1 | 370706980 | -24.405 | 199.540 | 2011-10-01T02:09 |
+| 1 | 370707563 | -29.039 | 188.283 | 2011-10-01T02:18 |
+| 1 | 370749809 | -13.162 | 118.548 | 2011-10-01T14:02 |
+
+All 15 points sit within **-13° to -29° latitude** — a narrow, non-polar
+band. Within each contiguous acquisition session the points trace a
+smooth orbital nadir track (e.g. cluster 0's four Sept 30 points move
+lat -13.6 → -27.7 as lon moves 333 → 299 over ~30 minutes); different
+sessions cover different, non-overlapping longitude strips roughly 100-190
+degrees apart — an expected consequence of observing at different times
+as Vesta rotates underneath the spacecraft, not itself evidence of
+anything compositional.
+
+**Literature search** (WebSearch, both cross-checked against multiple
+independent result summaries — full search transcript not reproduced
+here, only what's directly load-bearing):
+- De Sanctis et al.'s Dawn VIR Vesta mineralogy work (Science 2012;
+  follow-on Icarus special issue ~2015-2016) is the well-established,
+  widely-cited source for Vesta's global compositional pattern: **"the
+  south polar region (Rheasilvia) has its own spectral characteristics
+  ... Mg-pyroxene-rich terrains (diogenite-like), while the equatorial
+  areas have shallower band depths and average band centers at slightly
+  longer wavelengths, consistent with more eucrite rich materials"** —
+  and **"diogenite is concentrated within and around the Rheasilvia
+  basin"** (Rheasilvia center: 71°57'S, 86°18'E — Wikipedia, sourced from
+  the IAU gazetteer). This is high-confidence: it is the foundational,
+  most-cited finding in Dawn VIR Vesta literature, not a single
+  unreviewed source.
+- A finer unit, Vestalia Terra (center 3°44'S, 33°28'E, a ~300-430 km
+  N-S plateau), is described in the surrounding Tuccia/Urbinia
+  quadrangles as **"eucrite-rich howardite, though diogenite-rich
+  howardite areas are also present"** — i.e. even this named, published
+  unit is not compositionally homogeneous at the quadrangle scale.
+- Attempted to fetch the actual global/quadrangle spectral-parameter
+  maps for finer-grained lat/lon boundaries (De Sanctis/Ammannito/
+  Frigeri's "Atlas of Vesta Spectral Parameters" and the per-quadrangle
+  Icarus series): the ScienceDirect articles are paywalled (no full text
+  reachable), and the one open-access source found (an arXiv PDF on
+  Vesta's dielectric properties) could not be rendered in this
+  environment (missing `poppler-utils` for PDF page extraction) —
+  reported as a genuine access limitation, not glossed over.
+
+**Honest conclusion, precise about what is and isn't established:** the
+one well-established, high-confidence compositional boundary in the
+literature — polar (Rheasilvia, ~72°S) diogenite vs. equatorial
+eucrite/howardite — **does not explain our observed Band II
+bimodality**, because all 15 of our real observations sit at -13° to
+-29°, nowhere near that ~72°S boundary; our sample never crosses it.
+Vestalia Terra (center ~34°E) sits closer to two of our cluster-1 points
+(47-58°E) than to any cluster-0 point, but is itself described as
+compositionally mixed at the quadrangle scale, and most of our 15 points
+(96-333°E) are well outside it regardless. **No published map accessible
+in this session has fine enough resolution/coverage at these specific
+15 coordinates to say whether cluster 0's locations and cluster 1's
+locations fall on documented different, or the same, geologic units.**
+This is reported plainly as "no usable match found," not stretched into
+either a confirmation or a refutation of the acquisition-session
+confound hypothesis.
+
+### Part B — LAMO acquisition: an independent structural test
+
+Real orbital cadence, cross-checked (Planetary Society Dawn Journal
+entries, citing mission parameters): **HAMO ~950 km altitude, ~12 hour
+orbital period; LAMO ~180 km altitude, ~4 hour orbital period** — a real,
+citable factor-of-3 difference, giving LAMO a structurally different
+acquisition rhythm to test the confound against.
+
+**Real LAMO directory verification, not assumed to mirror HAMO:** FC's
+LAMO directory lists cycles 1-21 starting `2011347_CYCLE1`; VIR's LAMO
+directory (both `DWNVVIR_V1B`/`DWNVVIR_I1B`) starts at
+`20111231_CYCLE4` — **VIR cycles 1-3 are genuinely absent**, and the
+nominal `20111231_CYCLE4` directory itself 404s. Querying the live
+INDEX.TAB directly (not trusting directory names) found VIR's real
+`CYCLE4`-labeled data is entirely dated **2012-01-08, an 8-9 day
+schedule slip** from its nominal 2011-12-31 label; FC's own `CYCLE4`
+real window (2012-01-01 to just before 2012-01-08 06:31) ends right as
+VIR's begins, so the real temporal overlap is FC's *CYCLE5* against
+VIR's *CYCLE4* — same nominal cycle numbers do not mean same real time
+here, unlike HAMO. Added `lamo_cycle4` to `configs/config.yaml` using
+the real, verified dates (2012-01-07 to 2012-01-09), not the nominal
+directory-name dates — full reasoning recorded as a config comment.
+
+**A second real bug found and fixed** (in `ml/data/pds_acquisition.py`,
+not on this task's do-not-touch list): pulling FC data for this window,
+168 of 336 INDEX.TAB rows 404'd. Diagnosis: this LAMO volume's INDEX.TAB
+carries **two rows per real product** — one ending in `.LBL` under
+`/DATA/FITS/` (the real label + `.FIT` pair, exactly as HAMO's rows
+worked), and a second row whose `FILE_SPECIFICATION_NAME` points
+*directly* at the `/DATA/IMG/` `.IMG` data file itself (not a label at
+all). The old code assumed every row's path was a label and blindly
+appended `.FIT` — silently 404s on the second row type, and would have
+(if it happened to "succeed") saved a data file as if it were a label.
+Verified server-side: every one of the 168 non-`.LBL` rows in this
+window has an exact-match `.LBL` sibling row for the same real
+`PRODUCT_ID` — so the fix filters to `.LBL`-referencing rows only (168
+real unique products, not 336), logging a warning if any product were
+ever found with *no* `.LBL` sibling (none were, here). Re-ran: 168/168
+downloaded. Confirmed the earlier buggy runs had also re-introduced
+manifest duplication (1850 entries / 1178 unique) — deduplicated again
+by `product_id`, same method as Slice 9. `python -m pytest tests/ -q`:
+33/33 still passing (this fix touches only URL/path construction, no
+test covers it directly, but nothing regressed).
+
+**Real alignment re-run** (unmodified `align_dataset()`, combined
+HAMO+LAMO manifests):
+```
+Loaded geometry for 1178/1178 FC images (1168 usable footprint) and 140/140 VIR spectra (132 usable footprint)
+Alignment: 28518 FC x 24 VIR candidates in 24h window; 28278 computable; 787/28278 survived >= 0.30
+```
+**787 total survivors (743 HAMO + 44 new from LAMO).**
+
+**Chose LAMO-only (not combined) for the separability/confound test** —
+combining would blur exactly the comparison this track needs (does
+LAMO's *own* pattern replicate or break HAMO's). LAMO's 44 survivors
+resolve to 20 unique VIR products; pairing by clock count (same function,
+same script, unmodified) gives **8 real paired observations** (4 VIS-only
+products excluded as genuinely unpaired — logged by the script's existing
+warning, not hidden). All 8 usable.
+
+| clock | Band I (μm) | Band II (μm) | lat | lon | time |
+|---|---|---|---|---|---|
+| 379294594 | 0.9209 | 1.9573 | -12.57 | 22.31 | 2012-01-08T11:35 |
+| 379294841 | 0.9211 | 1.9573 | -18.49 | 17.67 | 2012-01-08T11:40 |
+| 379295088 | 0.9210 | 1.9573 | -24.32 | 13.01 | 2012-01-08T11:44 |
+| 379295335 | 0.9209 | 1.9574 | -30.08 | 8.35 | 2012-01-08T11:48 |
+| 379310520 | 0.9214 | 1.9574 | -15.09 | 84.45 | 2012-01-08T16:01 |
+| 379310767 | 0.9213 | 1.9574 | -21.11 | 79.79 | 2012-01-08T16:05 |
+| 379311014 | 0.9213 | 1.9574 | -27.03 | 75.11 | 2012-01-08T16:09 |
+| **379311261** | 0.9210 | **2.1643** | -32.85 | 70.42 | **2012-01-08T16:13** |
+
+Silhouette (k=2/3/4): **0.8740 / 0.6175 / 0.5192**.
+
+**A striking, load-bearing observation, reported precisely rather than
+smoothed over**: LAMO's Band II values land at **almost exactly the same
+two numbers HAMO produced** — ~1.957 μm and ~2.164 μm — not merely "also
+bimodal," but numerically matching to ~0.001 μm across two entirely
+independent mission phases. That level of exact numeric recurrence is
+unusual for continuous geological variation and raises a **third
+hypothesis this audit had not previously considered: a processing/
+wavelength-grid quantization artifact** in the band-center-fitting
+method itself (e.g. the parabola fit snapping to one of a small number
+of positions on VIR's fixed `BAND_BIN_CENTER` sampling grid regardless of
+subtle underlying spectral differences), which could produce clean-
+looking bimodality that reflects instrument/algorithm behavior rather
+than composition. This is flagged as a real, open alternative
+explanation — not investigated further here, per this task's scope, but
+recorded so it isn't silently missed by whoever labels next.
+
+**Confound check, and the key structural result**: LAMO's 7 "≈1.957"
+observations split into two real sessions the same day — 11:35-11:48 and
+16:01-16:09, **~4.3 hours apart, matching LAMO's own ~4h orbital period**
+— consistent with the same kind of session-driven rhythm HAMO showed.
+**But the single "≈2.164" observation (379311261) is NOT in a separate
+session**: it was acquired at 16:13, just **4 minutes after** the
+previous "≈1.957" observation (379311014, 16:09) in the *same* orbital
+pass, at a geographically adjacent location (lat -32.85/lon 70.42 vs.
+-27.03/75.11 — a few degrees apart, consistent with the same ground
+track). Illumination angles (incidence 45.25-46.48° vs. 46.23°;
+emission 6.53-12.22° vs. 10.96°; phase 46.24-49.36° vs. 46.07°) do not
+distinguish this point from its immediate neighbors either.
+
+**This is a real, structural difference from HAMO's confound pattern,
+reported honestly with its own sharp limitation**: in LAMO, a "different
+Band II value" appeared immediately adjacent in time and space to
+"same-session" neighbors, which HAMO's session-confound explanation
+would not predict (if session/orbital-pass alone drove the split, this
+point should have matched its session-mates, not jumped). That is weak
+evidence *against* the acquisition-session confound generalizing to
+LAMO, and weakly consistent with a real, spatially localized
+compositional transition within a single orbital pass. It is **weak**
+specifically because this is a single point (n=1) in the "≈2.164"
+group — nowhere near enough to draw a population-level conclusion, and
+exactly the same real number recurring from HAMO keeps the
+quantization-artifact explanation just as live as the composition one.
+
+### Bottom line across both tracks
+
+**Neither track resolves the question — both narrow it, honestly.**
+Track A: the one well-established published compositional boundary
+(polar diogenite vs. equatorial eucrite/howardite) doesn't apply to
+this sample's latitude range at all; no finer map was accessible to
+check further. Track B: LAMO replicates HAMO's exact two Band II values
+(raising a new, unresolved quantization-artifact hypothesis neither
+track had considered before), while its one cross-session data point
+weakly argues against (not for) the acquisition-session confound
+specifically. **Three live hypotheses remain open — acquisition-session
+confound, genuine localized composition, and band-center quantization
+artifact — and this task does not adjudicate between them**, per its
+explicit scope: no proceeding to `ml/data/spectral_labeling.py` or class
+assignment regardless of these findings. That remains a decision point
+for a follow-up conversation.

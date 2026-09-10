@@ -280,6 +280,31 @@ def fetch_framing_camera_images(
         rows = filter_rows_by_phase(rows, phase_window)
         logger.info("%d FC rows fall within phase=%s (%s to %s)", len(rows), phase, phase_window["start"], phase_window["stop"])
 
+    # Real bug found via Month 1 Slice 11's LAMO pull (half of a 336-row
+    # window 404'd): for at least this LAMO volume, INDEX.TAB carries TWO
+    # rows per real product -- one whose FILE_SPECIFICATION_NAME ends in
+    # .LBL under /DATA/FITS/ (the real label, paired with a real .FIT),
+    # and a second row whose FILE_SPECIFICATION_NAME points DIRECTLY at
+    # the /DATA/IMG/ .IMG data file itself (not a label at all -- treating
+    # it as one, as this code used to, downloads the .IMG file twice under
+    # two different guises and never fetches a real label for that row).
+    # Verified for this window: every product has both rows, so the fix is
+    # to keep only the genuine .LBL-referencing row per product, not to
+    # invent handling for a row-type that never carries unique data here.
+    non_lbl = [r for r in rows if not r["FILE_SPECIFICATION_NAME"].strip().upper().endswith(".LBL")]
+    if non_lbl:
+        seen_ids = {r.get("PRODUCT_ID", "").strip() for r in rows if r["FILE_SPECIFICATION_NAME"].strip().upper().endswith(".LBL")}
+        orphaned = [r for r in non_lbl if r.get("PRODUCT_ID", "").strip() not in seen_ids]
+        if orphaned:
+            logger.warning(
+                "%d FC row(s) have no .LBL-referencing sibling row (only a direct /DATA/IMG/ "
+                "reference) -- these products are SKIPPED rather than guessed at, to avoid "
+                "ever treating a data file as a label. Product IDs: %s",
+                len(orphaned), [r.get("PRODUCT_ID") for r in orphaned][:10],
+            )
+        rows = [r for r in rows if r["FILE_SPECIFICATION_NAME"].strip().upper().endswith(".LBL")]
+        logger.info("Dropped %d redundant non-.LBL INDEX.TAB row(s); %d real products remain", len(non_lbl), len(rows))
+
     if limit is not None:
         rows = rows[:limit]
 
