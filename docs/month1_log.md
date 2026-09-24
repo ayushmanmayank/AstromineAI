@@ -2327,3 +2327,126 @@ isolate the surviving structure from the newly-found mission-phase
 confound before combining phases again; (2) if a next task pursues
 labeling, it should not treat `confidence` as a nuisance parameter to
 average away — Step 5 shows it is not independent of cluster assignment.
+
+## Slice 15: controlling for mission phase — HAMO and LAMO analyzed separately
+
+**Task**: Slice 14's combined n=23 clustering mixed HAMO and LAMO,
+introducing a real mission-phase confound (p=0.027) that Slice 10/11's
+phase-separated analyses could not have caught. This slice removes that
+confound by construction — v2 silhouette, session-confound, and
+confidence checks re-run **separately** within HAMO (n=15) and LAMO
+(n=8), matching Slice 10/11's original phase-separated structure. Per
+scope: `ml/data/spatial_alignment.py`, `ml/utils/splits.py`, the
+specificity penalty, `ml/data/pds_acquisition.py`, and
+`compute_band_center_v2()` are all untouched (confirmed, `git diff
+--stat` empty on all four). No labeling attempted. New script:
+`scripts/recheck_confound_by_phase.py` (reuses
+`pair_observations_by_clock()`/`confound_summary()`/`silhouette_by_k()`
+from `audit_band_separability.py`, `extract_band_points_v2()` from
+`audit_band_separability_v2.py`, and `assign_sessions()` from
+`recheck_confound_v2.py`, all unmodified imports).
+
+**Step 2 — phase-separated silhouette scores, old method vs. v2**:
+
+| phase | old method (buggy) | v2, phase-separated |
+|---|---|---|
+| HAMO, n=15 (Slice 10 baseline) | 0.9982 / 0.9058 / 0.7234 | 0.590 / 0.621 / 0.588 |
+| LAMO, n=8 (Slice 11 baseline) | 0.8740 / 0.6175 / 0.5192 | 0.607 / 0.669 / 0.468 |
+
+These v2 numbers are identical to Slice 13's — Slice 13 already computed
+per-phase silhouette separately (it was Slice 14's *combined* n=23
+clustering that introduced the phase-mixing confound, not Slice 13's).
+Both phases retain real, moderate (not near-zero) structure once
+re-fitted on their own points: k=2 splits into 11/4 (HAMO) and 5/3
+(LAMO).
+
+**Step 3/4 — real session-confound match, phase held fixed by
+construction:**
+
+- **HAMO-only: 13 of 15 (86.7%)** match their real session's majority
+  cluster, across the same 4 real sessions Slice 11/14 used.
+- **LAMO-only: 7 of 8 (87.5%)** match, across the same 2 real sessions.
+
+Compared across all three versions of this check now on record:
+
+| dataset | old method (Slice 10/11) | v2, phase-mixed (Slice 14) | v2, phase-separated (this slice) |
+|---|---|---|---|
+| HAMO | 14/15 = 93.3% | 12/15 = 80.0% | **13/15 = 86.7%** |
+| LAMO | n/a (not checked this way in Slice 11) | 7/8 = 87.5% | **7/8 = 87.5%** |
+
+**This answers the task's own diagnostic question directly: HAMO's
+session-confound match rate moves *back up*, toward the original
+old-method number, once mission-phase mixing is removed (80.0% → 86.7%)
+— it does not drop toward 50%.** That is the cleaner signature: phase-
+mixing in Slice 14 was mildly *diluting* the apparent session confound,
+not inflating it, and with phase controlled for, the real acquisition-
+session correlation for HAMO is substantial and remains the best-
+supported explanation for HAMO's own residual structure. LAMO's number
+is unchanged in headline percentage (87.5% either way) but is **not the
+same underlying pattern**: the phase-separated LAMO clustering's one
+mismatching observation is `379295335`, not the previously-flagged
+`379311261` — the specific "exception" story from Slice 11 does not
+carry over unchanged to v2's phase-separated LAMO clusters, even though
+the aggregate rate happens to coincide.
+
+**Step 5 — fit confidence vs. cluster, within each phase alone:**
+
+- **HAMO-only** (cluster sizes 11/4): Band II confidence medians 0.137
+  vs 0.167. Mann-Whitney **p = 0.177** — not significant at this sample
+  size. Confidence is not a strong driver of HAMO's clustering.
+- **LAMO-only** (cluster sizes 5/3): Band II confidence medians 0.142
+  vs 0.201. Mann-Whitney **p = 0.036**. Checking the actual values
+  directly (not just the p-value): LAMO's phase-separated cluster of 3
+  (`379294594`, `379294841`, `379295088`) holds **exactly the 3 highest
+  Band II confidence values of all 8 LAMO observations**, and the other
+  cluster of 5 holds exactly the 5 lowest — a **perfect rank
+  separation**. p=0.036 is the smallest p-value achievable at all at
+  n=5-vs-3 (there is no more extreme 2-way split to observe), so this
+  is reported as what it is — the maximum possible signal this test can
+  register at this sample size — with the explicit caveat that n=8
+  total is too small to treat as a confirmed population-level effect on
+  its own. But the underlying pattern (LAMO's k=2 split exactly sorting
+  by fit confidence) is a real, concrete, and specific finding, not a
+  borderline statistical artifact of a noisy small sample.
+
+**Verdict — HAMO and LAMO tell different stories, not averaged
+together, per this task's own constraint:**
+
+- **HAMO**: controlling for mission phase makes the acquisition-session
+  explanation for its ~0.59-0.62 silhouette structure *more* plausible,
+  not less (match rate rose toward the original old-method number once
+  phase-mixing was removed), while fit confidence is not a significant
+  factor here (p=0.177). Real compositional signal is not ruled out by
+  this check alone, but session remains the best-supported alternative
+  explanation for HAMO specifically, exactly as Slice 11 originally
+  found before the band-center fix, now confirmed to survive the fix.
+- **LAMO**: its ~0.61-0.67 silhouette structure looks, on the current
+  evidence, more consistent with **a fit-confidence artifact** than with
+  either session or genuine composition — its k=2 split is a perfect
+  rank-ordering of `compute_band_center_v2()`'s own confidence output,
+  a mechanism that has nothing to do with acquisition timing or surface
+  mineralogy. This is a **new** explanation this task's design did not
+  originally anticipate for LAMO, surfaced because this check was run
+  and reported honestly rather than assumed to mirror HAMO's story. The
+  87.5% session match for LAMO is very likely coincidental given it
+  arises from a different specific point than the confidence-driven
+  split does.
+
+**Net effect on the "real compositional signal" hypothesis, with
+mission phase now controlled for**: **it looks less plausible, not
+more**, for a different reason in each phase. HAMO's residual structure
+already had a strong, specific non-compositional explanation (session)
+that phase-control leaves fully intact. LAMO's residual structure gains
+a strong, specific, previously-unconsidered non-compositional
+explanation (fit confidence) that this task's phase-separation was
+needed to expose (it was invisible inside Slice 14's phase-mixed
+analysis). No combination of the checks run across Slices 13-15 has yet
+produced evidence that positively favors genuine composition over a
+procedural/instrumental explanation for either phase. This remains
+short of a full REFUTED verdict — n=15 and n=8 are both small, and
+neither Mann-Whitney result nor either Fisher/session check is powered
+enough on its own to be fully conclusive — but the honest cumulative
+picture across four slices of checking is that every test performed so
+far has turned up a plausible non-compositional cause, never evidence
+for one that composition uniquely explains. No labeling proceeds from
+this finding.

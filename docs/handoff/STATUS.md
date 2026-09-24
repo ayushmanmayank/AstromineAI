@@ -794,3 +794,96 @@ itself all untouched (confirmed below). No labeling attempted.
 
 **Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
 `git log` on this branch — "Month 1 Slice 14"), pushed: yes.
+
+---
+
+## Session 8 — 2026-09-25
+
+**Task attempted:** Slice 14 found a real mission-phase confound (p=0.027)
+from combining HAMO+LAMO into one n=23 clustering. This session removes
+that confound by construction — re-run v2 silhouette, session-confound,
+and confidence checks separately within HAMO (n=15) and LAMO (n=8),
+matching Slice 10/11's original phase-separated structure. Per scope:
+`ml/data/spatial_alignment.py`, `ml/utils/splits.py`, the specificity
+penalty, `ml/data/pds_acquisition.py`, and `compute_band_center_v2()`
+itself all untouched (confirmed below). No labeling attempted.
+
+**What actually changed:**
+
+- `scripts/recheck_confound_by_phase.py` — new file, reuses
+  `pair_observations_by_clock()`/`confound_summary()`/`silhouette_by_k()`
+  from `audit_band_separability.py`, `extract_band_points_v2()` from
+  `audit_band_separability_v2.py`, and `assign_sessions()` from
+  `recheck_confound_v2.py` — all unmodified imports.
+- `docs/month1_log.md` — new "Slice 15" section.
+- This entry.
+
+**Real results:**
+
+- Phase-separated v2 silhouette (identical to Slice 13's numbers, since
+  Slice 13 already computed these per-phase — it was Slice 14's combined
+  clustering that introduced phase-mixing, not Slice 13): HAMO
+  0.590/0.621/0.588 (old-method baseline 0.9982/0.9058/0.7234); LAMO
+  0.607/0.669/0.468 (old-method baseline 0.8740/0.6175/0.5192). Real,
+  moderate structure persists in both once phase is held fixed.
+- **Session-confound match, phase held fixed: HAMO 13/15 = 86.7%; LAMO
+  7/8 = 87.5%.** HAMO's match rate moved *up* from Slice 14's phase-mixed
+  80.0% toward the original old-method 93.3% — phase-mixing was mildly
+  diluting the session confound, not inflating it. The session
+  explanation for HAMO's residual structure gets *more* plausible with
+  phase controlled for, not less. LAMO's rate is numerically unchanged
+  from Slice 14 (87.5%) but the specific mismatching observation
+  changed (`379295335` now, not the previously-flagged `379311261`) — a
+  different underlying pattern, not the same one persisting.
+- **New finding, LAMO only**: Mann-Whitney on Band II confidence by
+  cluster gives p=0.036 for LAMO (n=5 vs n=3) — checking the actual
+  values, this is a **perfect rank separation**: LAMO's 3-member cluster
+  holds exactly the 3 highest confidence values of all 8 LAMO
+  observations, the 5-member cluster exactly the 5 lowest. p=0.036 is
+  the smallest p-value achievable at all at this sample size (no more
+  extreme split exists), so it's reported as the maximum signal this
+  test can register here, not overstated as confirmatory at n=8. HAMO
+  shows no comparable pattern (p=0.177, not significant).
+- **Verdict written into `docs/month1_log.md`, Slice 15**: HAMO and LAMO
+  tell different stories, not averaged together. HAMO's structure is
+  best explained by acquisition session (strengthened by phase control).
+  LAMO's structure looks more consistent with a fit-confidence artifact
+  than with session or composition — a new explanation this task's
+  phase-separation was needed to expose. Across Slices 13-15, no check
+  has yet turned up evidence favoring genuine composition over a
+  procedural/instrumental cause in either phase; this stops short of a
+  full REFUTED verdict only because n=15/n=8 are both small. No labeling
+  proceeds.
+
+**Verified how:**
+
+- `scripts/recheck_confound_by_phase.py` was actually run against the
+  real, on-disk `datasets/metadata/sample_metadata.csv` (no new
+  downloads); every number above is copied from its real output.
+- The "perfect rank separation" claim for LAMO was checked directly
+  against the 8 real per-observation confidence values (not inferred
+  from the p-value alone).
+- `git diff --stat` confirmed zero changes to
+  `ml/data/spatial_alignment.py`, `ml/utils/splits.py`,
+  `ml/data/pds_acquisition.py`, and `ml/data/spectral_labeling.py`.
+- `python -m pytest tests/ -q`: 39/39 passing (unchanged code paths,
+  re-run as a sanity check).
+
+**Open issues / blockers:**
+
+- **Go/no-go: still not ready for labeling.** Two different
+  non-compositional explanations (session for HAMO, confidence for
+  LAMO) now each have real, specific support — neither phase has
+  produced evidence favoring composition.
+- n=15 (HAMO) and especially n=8 (LAMO, split 5/3) are both too small
+  for any single statistical test run here (Mann-Whitney, Fisher) to be
+  fully conclusive on its own — flagged explicitly per this task's own
+  constraint, not glossed over.
+- Concrete next step, not undertaken here: if `compute_band_center_v2()`
+  is ever revised to reduce the confidence spread it currently shows
+  (all 23 observations flagged ambiguous, Slice 13), LAMO's clustering
+  should be re-checked — its current split may not survive a version of
+  the method with more uniform confidence across observations.
+
+**Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
+`git log` on this branch — "Month 1 Slice 15"), pushed: yes.
