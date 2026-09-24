@@ -73,6 +73,11 @@ def main(argv=None) -> int:
     parser.add_argument("--model", choices=["resnet50", "vit_b"], required=True)
     parser.add_argument("--checkpoint", required=True, help="Path to a trained model state_dict (.pt)")
     parser.add_argument("--config", default="configs/config.yaml")
+    parser.add_argument(
+        "--metadata-csv", default=None,
+        help="Override the metadata CSV path (default: <config data.metadata_dir>/sample_metadata.csv, "
+        "the real dataset). See ml/models/train.py's matching flag.",
+    )
     parser.add_argument("--split", default="test")
     args = parser.parse_args(argv)
 
@@ -80,7 +85,7 @@ def main(argv=None) -> int:
 
     with open(args.config, "r", encoding="utf-8") as fh:
         config = yaml.safe_load(fh)
-    metadata_csv = f"{config['data']['metadata_dir']}/sample_metadata.csv"
+    metadata_csv = args.metadata_csv or f"{config['data']['metadata_dir']}/sample_metadata.csv"
 
     dataset = VestaDataset(metadata_csv, split=args.split)
     model = (cnn_resnet if args.model == "resnet50" else vit_model).build_model(num_classes=len(CLASSES))

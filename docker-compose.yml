@@ -17,6 +17,13 @@ services:
     build:
       context: .
       dockerfile: docker/frontend.Dockerfile
+      args:
+        # Browser-side value: the end user's browser (not the frontend
+        # container) makes this request, so it must be a URL reachable
+        # from the HOST machine -- the backend's own published port
+        # below, not an in-network container hostname/port. See
+        # docker/frontend.Dockerfile's comment and frontend/src/App.tsx.
+        VITE_API_BASE_URL: "http://localhost:8000"
     ports:
       - "5173:5173"
     depends_on:
