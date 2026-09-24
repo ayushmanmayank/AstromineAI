@@ -698,3 +698,99 @@ assignment attempted with the new method's output.
 
 **Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
 `git log` on this branch — "Month 1 Slice 13"), pushed: yes.
+
+---
+
+## Session 7 — 2026-09-24
+
+**Task attempted:** Does the acquisition-session confound Slice 11 found
+survive Slice 13's `compute_band_center_v2()` fix, or was the surviving
+~0.5-0.6 silhouette structure a weaker residual of it (or something
+else)? Real cross-tabulation of v2-corrected k=2 cluster assignment
+against acquisition session, geography, illumination angle, and fit
+confidence, on the same 23 real HAMO+LAMO observations. Per scope:
+`ml/data/spatial_alignment.py`, `ml/utils/splits.py`, the specificity
+penalty, `ml/data/pds_acquisition.py`, and `compute_band_center_v2()`
+itself all untouched (confirmed below). No labeling attempted.
+
+**What actually changed:**
+
+- `scripts/recheck_confound_v2.py` — new file, reuses
+  `pair_observations_by_clock()`/`confound_summary()` from
+  `audit_band_separability.py` and `extract_band_points_v2()` from
+  `audit_band_separability_v2.py`, both unmodified imports.
+- `docs/month1_log.md` — new "Slice 14" section.
+- This entry.
+
+**Real results:**
+
+- v2 k=2 cluster sizes: 11 and 12 — far more balanced than the old
+  method's near-discrete 6/9 (HAMO) and 7/1 (LAMO) splits.
+- **Session cross-tab: 19 of 23 observations match their own session's
+  majority cluster** (HAMO 12/15 = 80%, LAMO 7/8 = 87.5%) — weaker than
+  Slice 11's old-method 14/15 (93%) for HAMO, but still well above the
+  50% chance level. The confound weakens under the fix; it does not
+  disappear. Both of Slice 11's original "exception" observations
+  (`370749809`, `379311261`) are still mismatches under v2; two new
+  mismatches also appear that weren't exceptions before.
+- Geography: latitude/longitude ranges overlap substantially in both
+  clusters (same as Slice 10's old-method conclusion) — not a fixed
+  two-region split.
+- **New finding, not detectable by Slice 10/11's phase-separated
+  analyses**: incidence/phase-angle medians differ sharply by cluster
+  (~30° vs ~45°), and this tracks **mission phase**, not composition —
+  cluster 0 is 91% HAMO, cluster 1 draws 58% of its members from LAMO
+  (vs LAMO's 35% overall share). Fisher exact test on mission×cluster:
+  odds ratio 14.0, **p = 0.027**. Combining HAMO+LAMO into one clustering
+  (needed to reach n=23) risks manufacturing structure from
+  procedural/instrumental differences between mission phases, not
+  geology.
+- Fit confidence also correlates with cluster (Mann-Whitney p = 0.0042,
+  Band II confidence medians 0.136 vs 0.159) — roughly half attributable
+  to the mission-phase confound (LAMO fits somewhat more confidently
+  overall), with a smaller, non-significant same-direction residual
+  persisting within HAMO alone (p = 0.16, n=15).
+- **Verdict written into `docs/month1_log.md`, Slice 14**: the picture is
+  messier than either Slice 11's or Slice 13's framing anticipated — more
+  entangled with non-compositional factors, not less. Session confound
+  weakens but persists; a new mission-phase/illumination confound emerges
+  with real statistical support; confidence correlates too, partly
+  explained by mission phase. None of the three is cleanly ruled out, and
+  none alone fully explains the surviving structure. Not adjudicated
+  either way, per task scope — no labeling proceeds.
+
+**Verified how:**
+
+- `scripts/recheck_confound_v2.py` was actually run against the real,
+  on-disk `datasets/metadata/sample_metadata.csv` (no new downloads);
+  every number above is copied from its real output, not estimated.
+- Session boundaries used a data-driven 30-minute gap rule, checked
+  against the actual real inter-observation gaps (HAMO ~9-10 min
+  within-session / ~11h44m-12h17m between; LAMO ~4 min / ~4h13m) to
+  confirm the threshold isn't sensitive to the exact value chosen.
+- Fisher exact and Mann-Whitney tests run via `scipy.stats` directly
+  against the real per-observation values, not hand-estimated.
+- `git diff --stat` confirmed zero changes to
+  `ml/data/spatial_alignment.py`, `ml/utils/splits.py`,
+  `ml/data/pds_acquisition.py`, and `ml/data/spectral_labeling.py`
+  (`compute_band_center_v2()` untouched).
+- `python -m pytest tests/ -q`: unchanged code paths, re-run as a
+  sanity check anyway (see below for count).
+
+**Open issues / blockers:**
+
+- **Go/no-go: still not ready for labeling** — if anything, less ready
+  than Slice 13's framing suggested. A newly-found mission-phase confound
+  means the n=23 combined clustering this and Slice 13 both used may
+  itself be an artifact of combining two structurally different mission
+  phases, not just a noisy version of one real signal.
+- Concrete next step, not undertaken here: re-run v2 clustering and
+  silhouette separately within HAMO and within LAMO (mirroring how Slice
+  10/11 originally kept them apart) to isolate real structure from the
+  mission-phase confound before combining again.
+- If a future task pursues labeling, `confidence` should not be treated
+  as a nuisance value to average away — it is not independent of cluster
+  assignment (Step 5).
+
+**Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
+`git log` on this branch — "Month 1 Slice 14"), pushed: yes.

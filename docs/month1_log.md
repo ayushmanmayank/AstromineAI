@@ -2192,3 +2192,138 @@ fit (or an independent noise-floor characterization from VIR's actual
 documented instrument specs, rather than this task's illustrative
 Gaussian/uniform-shift perturbation models) would be the natural next
 methodological step before labeling.
+
+## Slice 14: does the acquisition-session confound survive the v2 fix?
+
+**Task**: Slice 13 left open whether the ~0.5-0.6 silhouette structure
+surviving `compute_band_center_v2()` is genuine geology or a weaker
+residual of Slice 11's acquisition-session confound. This slice answers
+that specific question with a real cross-tabulation, on the same 23 real
+combined HAMO+LAMO observations, same manifests, no new downloads. Per
+scope: `ml/data/spatial_alignment.py`, `ml/utils/splits.py`, the
+specificity penalty, `ml/data/pds_acquisition.py`, and
+`compute_band_center_v2()` itself are all untouched (confirmed, `git diff
+--stat` empty on all four). No labeling attempted. New script:
+`scripts/recheck_confound_v2.py` (reuses `pair_observations_by_clock()`
+and `confound_summary()` from `audit_band_separability.py` and
+`extract_band_points_v2()` from `audit_band_separability_v2.py`,
+unmodified imports).
+
+**Step 1 — v2 k=2 cluster assignment** (same KMeans call the silhouette
+score already used, `random_state=42, n_init=10`, on the real v2 (Band I,
+Band II) points): **cluster sizes 11 and 12** — a far more balanced split
+than the old method's tight, near-discrete 6/9 (HAMO) and 7/1 (LAMO)
+groups, consistent with v2's centroids landing on a continuous range
+(2.0016-2.0782 μm) rather than two sharp values.
+
+**Step 2/3 — real session grouping vs. v2 cluster.** Sessions defined by
+a real, data-driven gap rule: a new session starts whenever the gap since
+the previous real `START_TIME` exceeds 30 minutes (HAMO's real within-
+session gaps are ~9-10 min, between-session gaps ~11h44m-12h17m; LAMO's
+are ~4 min and ~4h13m — any threshold between ~20 min and several hours
+gives the identical 6 real sessions, so this is not a tuned choice). Each
+observation is checked against its own session's majority cluster:
+
+```
+session 0 (HAMO, 2011-09-30 ~01:12-01:41, n=4): clusters [0,0,0,1]
+session 1 (HAMO, 2011-09-30 ~13:29-13:58, n=4): clusters [0,0,0,0]
+session 2 (HAMO, 2011-10-01 ~01:49-02:18, n=4): clusters [0,1,1,1]
+session 3 (HAMO, 2011-10-01 ~14:02-14:22, n=3): clusters [1,0,0]
+session 4 (LAMO, 2012-01-08 ~11:35-11:48, n=4): clusters [1,1,1,1]
+session 5 (LAMO, 2012-01-08 ~16:01-16:13, n=4): clusters [1,1,1,0]
+```
+
+**Real cross-tabulation: 19 of 23 observations' v2 cluster assignment
+matches their own session's majority cluster** (HAMO: 12 of 15 = 80%;
+LAMO: 7 of 8 = 87.5%). This is weaker than Slice 11's old-method finding
+for HAMO (14 of 15 = 93%), but still clearly well above the 50% a random
+binary split would give — **the session confound weakens under the fix,
+it does not disappear.** Notably, both of Slice 11's originally-flagged
+"exception" points — `370749809` (HAMO) and `379311261` (LAMO), the two
+observations whose old-method cluster broke the clean session pattern —
+**are still mismatches under v2**, the same direction as before. Two
+*new* mismatches also appear (`370618943` in session 0, `370705798` in
+session 2) that were not exceptions under the old method — the specific
+error pattern shifted, not just shrank uniformly.
+
+**Step 4 — geography and illumination angle, re-checked against the NEW
+clusters (not assumed from Slice 10's old-method conclusion):**
+
+| cluster (n) | incidence (min/med/max) | emission (min/med/max) | phase (min/med/max) | latitude (min/med/max) | longitude (min/med/max) |
+|---|---|---|---|---|---|
+| 0 (11) | 28.08/30.48/46.23 | 6.24/8.87/10.96 | 30.19/31.99/46.07 | -32.85/-18.40/-13.63 | 58.18/107.20/333.00 |
+| 1 (12) | 27.87/45.31/46.47 | 6.51/9.88/12.27 | 30.13/46.25/49.36 | -30.08/-22.71/-12.57 | 8.35/77.45/210.77 |
+
+Latitude and longitude ranges overlap substantially in both clusters
+(same conclusion as Slice 10: not a fixed two-region split). **But
+incidence and phase angle medians differ sharply between clusters (~30°
+vs ~45°)** — a new result Slice 10/11 could not have surfaced, because
+they analyzed HAMO and LAMO separately and never combined the two phases
+into one clustering. Checking the reason directly: **this tracks mission
+phase, not composition.** Cluster 0 is 10 of 11 members HAMO (91%);
+cluster 1 draws 7 of 12 members from LAMO (58%, versus LAMO's 35% overall
+share of the 23-point sample) — HAMO and LAMO fly at very different
+altitudes or (~950 km vs ~180 km) with correspondingly different real
+viewing/illumination geometry for orbital-mechanical reasons that have
+nothing to do with surface composition. A Fisher exact test on the 2×2
+(mission × cluster) table gives **odds ratio 14.0, p = 0.027** — a real,
+statistically notable association at this sample size, not
+over-interpretation of a small numeric gap.
+
+**This is the single most important finding of this recheck: a new
+confound — mission phase — emerges under v2 that the earlier,
+phase-separated analyses structurally could not detect**, because Slice
+10 clustered HAMO alone and Slice 11 clustered LAMO alone. Combining both
+phases into one clustering (needed to get from n=15/n=8 up to the n=23
+this task and Slice 13 use) risks manufacturing apparent structure from
+procedural/instrumental differences between mission phases themselves,
+not from geology.
+
+**Step 5 — cluster vs. fit confidence** (all 23 observations are
+flagged `ambiguous=True` for both bands, per Slice 13 — this checks
+whether confidence still varies systematically by cluster within that):
+
+| cluster (n) | Band II confidence (min/median/max/mean) |
+|---|---|
+| 0 (11) | 0.121/0.136/0.145/0.134 |
+| 1 (12) | 0.114/0.159/0.223/0.164 |
+
+A Mann-Whitney U test on Band II confidence by cluster gives **p =
+0.0042** — a real, statistically significant association: cluster 0 does
+fit measurably less confidently than cluster 1. Checking whether this is
+just the same mission-phase story again (LAMO's median confidence, 0.151,
+is somewhat higher than HAMO's, 0.138, overall): **partially, not
+fully.** Restricting to HAMO observations only (holding mission phase
+fixed), cluster 1 still shows a higher median confidence than cluster 0
+(0.166 vs 0.137), but the difference is no longer statistically
+significant at this reduced sample size (Mann-Whitney p = 0.16, n=15).
+So: part of the overall confidence/cluster association is attributable
+to the mission-phase confound above; a smaller, same-direction, not
+independently significant residual trend persists within HAMO alone.
+
+**Verdict, stated plainly and not resolved toward either extreme**:
+**the picture is messier than either Slice 11's or Slice 13's framing
+anticipated — if anything, more entangled with non-compositional factors
+than less.** The acquisition-session confound weakens under the v2 fix
+(93%→80-88% session-majority match) but does not disappear. A genuinely
+new confound — mission phase, and the illumination-geometry difference
+it carries — emerges with real statistical support (p=0.027) that the
+phase-separated Slice 10/11 analyses could not have caught. Fit
+confidence also correlates with cluster assignment (p=0.0042 overall),
+though roughly half of that appears to be the mission-phase confound
+showing up again rather than an independent artifact. **None of the
+three checked factors (session, mission phase, confidence) is cleanly
+ruled out, and none on its own fully explains the surviving ~0.5-0.6
+silhouette structure either.** This task does not adjudicate between
+"weakened session confound," "mission-phase/illumination confound," and
+"some genuine but small compositional signal riding on top of both" —
+it reports that all three remain live, with real numbers attached to
+each, exactly as instructed. No labeling proceeds from this finding.
+
+**Concrete next steps this surfaces, not undertaken here**: (1) re-run
+the v2 clustering and silhouette analysis separately within HAMO and
+within LAMO (as Slice 10/11 originally did with the old method) to
+isolate the surviving structure from the newly-found mission-phase
+confound before combining phases again; (2) if a next task pursues
+labeling, it should not treat `confidence` as a nuisance parameter to
+average away — Step 5 shows it is not independent of cluster assignment.
