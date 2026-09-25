@@ -2450,3 +2450,135 @@ picture across four slices of checking is that every test performed so
 far has turned up a plausible non-compositional cause, never evidence
 for one that composition uniquely explains. No labeling proceeds from
 this finding.
+
+## Slice 16: final, bounded acquisition attempt — confirmed negative result
+
+**Task**: Slices 6-15 found no compositional signal distinguishable from
+acquisition-session and fit-confidence confounds on the existing
+23-observation sample. This slice makes **one bounded, final** attempt
+to break those confounds with new, deliberately diversified real
+acquisition, with an explicit stopping rule agreed in advance — not
+open-ended. Per scope: `ml/data/spatial_alignment.py`, `ml/utils/splits.py`,
+the specificity penalty, and `compute_band_center_v2()` were not modified
+(confirmed, `git diff --stat` empty on all three) — see note below on a
+harmless pre-existing logging bug discovered but not touched.
+
+**Step 1 — real, diversified acquisition.** Verified against the live
+INDEX.TAB (not directory names) before adding anything: two additional
+real HAMO cycles with confirmed different session time-of-day patterns
+than the original `hamo_cycle1` (`hamo_cycle3`: 2011-10-11 to 10-16,
+real sessions at hours 7-11/19-23 UTC; `hamo_cycle6`: 2011-10-26 to
+11-01, HAMO's actual last cycle, sessions at hours 3-5/15-18 UTC — both
+confirmed distinct from `hamo_cycle1`'s 1/13 UTC pattern), plus one
+denser real LAMO window three months after `lamo_cycle4`
+(`lamo_window2`: 2012-04-13 to 04-18, 120 real VIR rows before the
+existing HK/QQ-ancillary filter vs. `lamo_cycle4`'s much thinner
+original sample). All three added to `configs/config.yaml`'s
+`mission_phases` with full real-verification reasoning in comments,
+same discipline as every prior acquisition slice.
+
+**A real process mistake, corrected, reported honestly**: mid-acquisition,
+`configs/config.yaml`'s new entries were stashed to keep an unrelated
+parallel branch clean, while the acquisition loop was still running and
+reads that file fresh per phase — `hamo_cycle6` and `lamo_window2` each
+crashed with a `KeyError` on their first attempt as a direct result. Not
+a data or science error (nothing was silently wrong; the failure was a
+loud crash), but a correctness-relevant process mistake, so it's recorded
+here rather than glossed over. Fixed by restoring the config and
+re-running both phases cleanly. Both also hit ordinary transient network
+failures on top of that (a handful of DNS/connection-reset/`522`
+errors, ~1-2% of attempted products each) — all logged as warnings by
+the existing, unmodified error handling, not silent.
+
+**Real final acquisition counts**: `hamo_cycle3` 507/507 FC (3 of 138 VIR
+products failed transiently), `hamo_cycle6` 986/1000 FC (capped;
+2580 real products existed) + 57/57 VIR IR + 55/56 VIR VIS, `lamo_window2`
+440/440 FC + 40/40 VIR IR + 40/40 VIR VIS. Manifests re-deduplicated by
+`product_id` after the repeated attempts (3128→3125 FC, 477→471 VIR —
+same append-only-manifest pattern as Slices 9/11, not a new bug).
+
+**Step 2 — real alignment re-run** (`align_dataset()`, completely
+unmodified): **2649 total real survivors, resolving to 312 unique real
+VIR spectra** (up from 787 survivors / 50 spectra before this slice —
+more than a 6x increase in unique spectra). Pairing by clock (same
+unmodified script function) across the combined dataset gives **141 real
+paired observations**: **104 HAMO + 37 LAMO** (30 clocks excluded as
+genuinely VIS-or-IR-only, logged not hidden).
+
+*A harmless pre-existing bug noticed in passing, not fixed*:
+`spatial_alignment.py`'s own alignment-summary log line has a
+format-string/argument-count mismatch (prints a nonsensical "24 VIR
+candidates" — actually `max_time_delta_hours` reused in the wrong slot)
+that has apparently been there since the function was written. Confirmed
+by reading the source directly that this affects only a human-readable
+INFO log message — the real computation, the real 2649-row CSV, and
+every real confidence/geometry field are unaffected. Left untouched per
+this task's explicit scope (a cosmetic logging issue is not "a new issue
+[the do-not-touch files] don't cover").
+
+**Mission-phase classification note**: earlier slices classified HAMO vs.
+LAMO by clock-count string prefix (`"370.../379..."`), which only worked
+because exactly two narrow windows existed. This slice's new real clock
+counts start with `"372"/"373"` (new HAMO cycles) and `"387"` (new LAMO
+window) — prefix matching would have silently misclassified them.
+Classified instead by the real, unambiguous `"_HAMO"`/`"_LAMO"` substring
+present in every real PDS3 VIR label path, verified directly against the
+real paths before relying on it (new script:
+`scripts/recheck_confound_slice16.py`, reusing every existing function
+read-only — `pair_observations_by_clock`, `extract_band_points_v2`,
+`confound_summary`, `silhouette_by_k`, `assign_sessions`).
+
+**Step 3 — phase-separated silhouette + confound checks, real numbers,
+much larger sample:**
+
+| phase | n | silhouette k=2/3/4 | session match | confidence Mann-Whitney p |
+|---|---|---|---|---|
+| HAMO (all 3 cycles combined) | 104 | 0.528 / 0.540 / 0.474 | **88/104 = 84.6%** (31 real sessions) | **p = 2.6×10⁻⁷** |
+| LAMO (both windows combined) | 37 | 0.517 / 0.435 / 0.473 | **34/37 = 91.9%** (4 real sessions) | **p = 8.4×10⁻⁵** |
+
+**Both numbers replicate the smaller-sample findings almost exactly, now
+at real statistical power.** HAMO's session-match rate (84.6%) lands
+right between Slice 11's original 93.3% (n=15) and Slice 15's
+phase-separated 86.7% (n=15) — not a fluke of a small sample, a real,
+stable, replicated ~85-90% correlation that now spans 31 independent
+real sessions instead of 4. LAMO's 91.9% (n=37, 4 sessions) likewise
+closely matches Slice 15's 87.5% (n=8). The confidence-cluster
+association, previously only suggestive at n=8 (a p-value sitting at the
+literal floor of what that sample size could produce), is now
+**overwhelmingly significant in both phases independently** — this is no
+longer an artifact of a tiny sample.
+
+**Reference check, mission-phase mixing (combined, not the primary
+analysis — included only to confirm Slice 14/15's finding scales too)**:
+combining HAMO+LAMO reproduces the same severe mission-phase confound at
+much higher power — Fisher exact odds=26.9, **p = 1.2×10⁻⁹** (vs. Slice
+14's odds=14.0, p=0.027 at n=23). Combining phases is confirmed, more
+strongly than before, to manufacture apparent structure from which
+mission phase an observation came from.
+
+**Applying the pre-agreed stopping rule, honestly, to the real
+numbers**: structure survives (silhouette 0.43-0.54, not near zero) —
+**but session explains most of it in both phases, at high statistical
+power, and fit confidence explains a real, independent, highly
+significant share too.** This is squarely the negative-result branch of
+the stopping rule ("if session, phase, or confidence still explains the
+structure... this is a confirmed negative result"), not the positive
+branch (which requires *neither* confound to explain the surviving
+structure). **Verdict: CONFIRMED NEGATIVE.** Across Slices 10 through
+16 — six independent checking passes, the last one at 6x the sample
+size specifically designed to stress-test the first five — no test has
+ever produced evidence favoring genuine Vesta compositional signal over
+a procedural/instrumental explanation. This is Month 1's data-science
+track's final result for the compositional-signal question, not a
+provisional one.
+
+**Per this task's explicit constraint: this is the last acquisition
+round for this investigation.** No further data is planned to be pulled
+chasing this question. If a future task wants to pursue compositional
+labeling despite this, it would need either (a) a fundamentally
+different band-center-fitting method proven robust to the confidence
+confound demonstrated here, or (b) an acquisition design that structurally
+decorrelates session timing from any candidate compositional signal
+(e.g. repeated observations of the *same* ground track at deliberately
+different times of day) — neither exists yet. No labeling proceeds from
+this task.

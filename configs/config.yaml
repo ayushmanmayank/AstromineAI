@@ -162,6 +162,41 @@ data:
     # verified dates (with a 1-day buffer either side of VIR's single
     # real day), not the nominal directory-name dates.
     lamo_cycle4:           {start: "2012-01-07", stop: "2012-01-09"}
+    # Slice 16: three additional, deliberately diversified real windows,
+    # added specifically to break the acquisition-session and
+    # fit-confidence confounds Slices 6-15 found in the original
+    # hamo_cycle1 + lamo_cycle4 sample. Verified directly against the
+    # real volume-level INDEX.TAB (parse_index_table(), unmodified) before
+    # adding here, same discipline as every prior acquisition slice --
+    # not assumed from directory names alone.
+    #
+    # hamo_cycle3: FC's '2011284_CYCLE3' and VIR's '20111011_CYCLE3' both
+    # start 2011-10-11 (day 284); the next cycle (both instruments'
+    # CYCLE4) starts 2011-10-16 -- no schedule slip here, unlike LAMO.
+    # Real per-day session hours in this window (checked directly): 7-11
+    # and 19-23 UTC -- genuinely different from hamo_cycle1's 1 and 13 UTC
+    # sessions, not just a different date.
+    hamo_cycle3:           {start: "2011-10-11", stop: "2011-10-16"}
+    # hamo_cycle6: FC's '2011299_CYCLE6' and VIR's '20111026_CYCLE6' both
+    # start 2011-10-26 (day 299); this is HAMO's LAST cycle, ending at
+    # HAMO's own phase stop (2011-11-01) -- no CYCLE7 exists in either
+    # instrument's real directory listing. Real per-day session hours:
+    # 3-5 and 15-18 UTC -- a third, distinct time-of-day pattern from both
+    # hamo_cycle1 (1, 13) and hamo_cycle3 (7-11, 19-23).
+    hamo_cycle6:           {start: "2011-10-26", stop: "2011-11-01"}
+    # lamo_window2: a real, denser LAMO window ~3 months after
+    # lamo_cycle4, chosen because lamo_cycle4's real n=8 paired
+    # observations were too thin to separate its own confidence-confound
+    # (Slice 15) from a real effect. Verified directly against the real
+    # volume-level INDEX.TAB: VIR IR has 120 real rows in this window
+    # (2012-04-15T00:00 to 14:11), a single real day with multiple
+    # sessions (hours 0, 5, 9, 13, 14 UTC) -- about 15x lamo_cycle4's
+    # total row count. FC has 880 real INDEX.TAB rows in the same window
+    # (2012-04-14T23:35 to 2012-04-17T14:45) -- includes the same
+    # label/non-label row duplication Slice 11 found and fixed in
+    # pds_acquisition.py, so the existing .LBL-only filter applies here
+    # unchanged, not re-diagnosed.
+    lamo_window2:          {start: "2012-04-13", stop: "2012-04-18"}
     hamo_2:                {start: "2012-06-15", stop: "2012-07-24"}
     transfer_to_ceres:     {start: "2012-07-25", stop: "2012-09-05"}
 
