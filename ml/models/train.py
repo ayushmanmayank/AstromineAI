@@ -2,11 +2,19 @@
 Training entry point for the Month 1 proposal's 3-way model comparison
 (baseline / ResNet-50 / ViT-B).
 
-Real, runnable training loop — not a stub. Has never been run end-to-end
-against real labeled data: as of Month 1 slice 3, VestaDataset has 0
-usable samples in every split (see docs/month1_log.md). This script
-checks that up front and exits with a clear message rather than "training"
-on an empty dataset and reporting a meaningless 100%/0% accuracy.
+Real, runnable training loop — not a stub. As of Month 1, VestaDataset had
+0 usable (real-labeled) samples in every split (see docs/month1_log.md);
+this script still checks that up front and exits with a clear message
+rather than "training" on an empty dataset and reporting a meaningless
+100%/0% accuracy.
+
+Month 2 engineering pipeline update: this has now actually been run
+end-to-end, but only against a SYNTHETIC label set
+(datasets/metadata/sample_metadata_SYNTHETIC.csv, see
+scripts/generate_synthetic_labels.py and docs/engineering_status.md) —
+real compositional labels do not exist yet as of this branch. Pass
+--metadata-csv to point at that file; the default is unchanged (the real,
+currently-unlabeled dataset).
 """
 
 from __future__ import annotations
@@ -14,6 +22,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -80,8 +89,16 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--model", choices=["baseline_logreg", "baseline_rf", "resnet50", "vit_b"], required=True)
     parser.add_argument("--config", default="configs/config.yaml")
+    parser.add_argument(
+        "--metadata-csv", default=None,
+        help="Override the metadata CSV path (default: <config data.metadata_dir>/sample_metadata.csv, "
+        "the real dataset). Month 2 engineering pipeline validation passes "
+        "datasets/metadata/sample_metadata_SYNTHETIC.csv here explicitly -- this flag never changes "
+        "the default, so every existing/real invocation is unaffected.",
+    )
     parser.add_argument("--epochs", type=int, default=10)
     parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--checkpoint-out", default=None, help="If set, save the trained torch model's state_dict here.")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -89,7 +106,7 @@ def main(argv=None) -> int:
 
     with open(args.config, "r", encoding="utf-8") as fh:
         config = yaml.safe_load(fh)
-    metadata_csv = f"{config['data']['metadata_dir']}/sample_metadata.csv"
+    metadata_csv = args.metadata_csv or f"{config['data']['metadata_dir']}/sample_metadata.csv"
 
     train_ds = VestaDataset(metadata_csv, split="train")
     val_ds = VestaDataset(metadata_csv, split="val")
@@ -103,7 +120,11 @@ def main(argv=None) -> int:
     else:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         model = (cnn_resnet if args.model == "resnet50" else vit_model).build_model(num_classes=len(CLASSES))
-        train_torch_model(model, train_ds, val_ds, epochs=args.epochs, lr=args.lr, device=device)
+        model = train_torch_model(model, train_ds, val_ds, epochs=args.epochs, lr=args.lr, device=device)
+        if args.checkpoint_out:
+            Path(args.checkpoint_out).parent.mkdir(parents=True, exist_ok=True)
+            torch.save(model.state_dict(), args.checkpoint_out)
+            logger.info("Saved trained %s state_dict to %s", args.model, args.checkpoint_out)
 
     return 0
 

@@ -1,5 +1,18 @@
 import { useState } from "react";
 
+// In `npm run dev`, vite.config.ts's server.proxy forwards relative
+// "/predict"/"/health" to the backend -- but that's a dev-server-only
+// feature; the production build (docker/frontend.Dockerfile's `vite
+// build` + `serve -s dist`) has no such proxy, so a relative fetch from
+// that build 404s/gets the SPA's own index.html back instead of the
+// backend's JSON (found and confirmed via a real docker-compose run,
+// Month 2 engineering pipeline -- not a hypothetical). VITE_API_BASE_URL
+// is a build-time env var (see docker/frontend.Dockerfile,
+// docker-compose.yml) so the production build can point at the
+// backend's real published URL; empty string (the dev-server default)
+// preserves the existing relative-path/proxy behavior exactly.
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "";
+
 interface PredictResponse {
   prediction: string;
   confidence: number;
@@ -21,7 +34,7 @@ export default function App() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const response = await fetch("/predict", { method: "POST", body: formData });
+      const response = await fetch(`${API_BASE}/predict`, { method: "POST", body: formData });
       if (!response.ok) {
         const body = await response.json();
         throw new Error(body.detail ?? `Request failed: ${response.status}`);
