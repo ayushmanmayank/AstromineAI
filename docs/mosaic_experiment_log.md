@@ -207,3 +207,61 @@ learning something beyond brightness/location; per this experiment's own
 rule, if a later deep model lands within ~3 points of the random-forest
 number above (55.80%), that will be reported as "not learning anything
 beyond brightness/location," not reasoned around. Proceeding to Stage 3.
+
+## Stage 3: Tiles + split
+
+Real, fixed rules (`scripts/mosaic_tile.py`, not tuned after seeing
+results): 224x224 px tiles at FC's native resolution (3.0198°/side, one
+scale — a second scale is a documented future option, not pursued here
+given time scope); drop a tile if >20% of its real FC pixels are
+nodata; label = majority real VIR tertile class within the tile's real
+footprint (both mosaics are true equirectangular on the same sphere, so
+a rectangular FC tile maps to an exact rectangular VIR-pixel window —
+only 2 corners need converting per tile, not every pixel); drop a tile
+if <60% of its covering VIR label pixels agree (a real majority with
+margin, not a bare ~34% plurality). Region-block (20°) split with a
+one-tile buffer (`ml/utils/mosaic_splits.py`).
+
+**Real result**: of 7021 candidate tiles, 2975 kept. Dropped: 0 for
+nodata (FC's real coverage has no gaps at this scale), 869 for no real
+VIR coverage overlap at all, **3177 for low label purity** — more than
+45% of all candidate tiles. This is itself an important, honest finding:
+the tertile classes are finely spatially intermixed within individual
+~3°-wide tiles far more often than they form clean, tile-sized regional
+blocks — consistent with Stage 2's narrow real dynamic range finding
+(0.9102-0.9598 μm across the whole planet). A further 1481 tiles were
+buffered out near block boundaries, leaving **1494 real tiles** across
+the three splits:
+
+| split | total | band1_low | band1_mid | band1_high |
+|---|---|---|---|---|
+| train | 1049 | 455 | 133 | 461 |
+| val | 223 | 55 | 35 | 133 |
+| test | 222 | 96 | 27 | 99 |
+
+Two real, honest characteristics of this split, reported plainly rather
+than smoothed over:
+1. **`band1_mid` is underrepresented in every split** (13-16% of each,
+   vs. ~33% at the pixel level) — majority-voting many pixels per tile
+   systematically favors the two extreme tertiles over the narrow
+   middle one, a real statistical consequence of tile-level aggregation
+   of a 3-way split, not a bug.
+2. **Class balance differs noticeably across splits** (`band1_high` is
+   60% of val but only 44%/45% of train/test) — a real, expected
+   consequence of region-BLOCK (not tile, not i.i.d.) splitting: whole
+   large geographic blocks are assigned to a split as a unit, so if
+   `band1_high` happens to concentrate in the particular large regions
+   that were randomly assigned to val, val's class balance shifts
+   accordingly. This is accepted as the honest cost of leakage-safe
+   spatial splitting, not corrected post-hoc (stratifying splits by
+   label at the block level would require choosing blocks based on
+   their own label content, which risks exactly the kind of label-aware
+   split-selection this experiment's rules are designed to prevent).
+
+Real tile manifest (committed): `datasets/mosaic/manifests/tile_manifest.csv`
+(2975 rows — every candidate tile that survived nodata+purity filtering,
+including the 1481 marked `split=buffered_out`, so the full real
+accounting is traceable). Tile PNGs themselves are *not* committed
+(`datasets/mosaic/tiles/`, gitignored, regenerable from the manifest +
+the checksummed raw mosaics). Spot-checked: real tile images show
+genuine Vesta crater-field terrain, not corrupted/blank data.

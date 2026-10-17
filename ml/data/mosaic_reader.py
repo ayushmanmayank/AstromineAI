@@ -230,3 +230,12 @@ def fc_lonlat_to_pixel(meta: FcMosaic, lon_deg: float, lat_deg: float) -> tuple[
     inv = ~meta.transform
     col, row = inv * (x, y)
     return row, col
+
+
+def fc_pixel_to_lonlat(meta: FcMosaic, row: float, col: float) -> tuple[float, float]:
+    """Inverse of fc_lonlat_to_pixel(): real FC pixel -> real
+    Claudia-Double-Prime longitude (-180..180) + latitude."""
+    x, y = meta.transform * (col, row)
+    lon_deg = np.rad2deg(x / meta.sphere_radius_m)
+    lat_deg = np.rad2deg(y / meta.sphere_radius_m)
+    return lon_deg, lat_deg
