@@ -1077,3 +1077,124 @@ longitude standardization, and `ml/utils/splits.py` untouched.
 
 **Branch/commit:** `final/closeout`, this entry's own commit, pushed:
 yes. Pull request opened to `main`, not merged.
+
+---
+
+## Session 11 — 2026-10-17 — frontend redesign
+
+**Task attempted:** Port an approved frontend design into the React app.
+Frontend only — `backend/`, `ml/`, and `docs/month1_log.md` not touched
+(confirmed below). Branched `final/frontend-redesign` from
+`final/closeout`.
+
+**What actually changed:**
+
+- `frontend/index.html` — added Google Fonts `<link>`s for IBM Plex Sans
+  (400/500/600) and IBM Plex Mono (400/500).
+- `frontend/src/main.tsx` — one new import (`./styles.css`).
+- `frontend/src/styles.css` — new file: all design tokens (colors,
+  radii, 44px min button height, `:focus-visible` outline) and the full
+  layout (header, warning banner, two-panel layout, result grid,
+  footer), plain CSS, no UI library.
+- `frontend/src/App.tsx` — rewritten to the approved layout. Kept
+  unchanged, verbatim, per the task's explicit constraint: the
+  `API_BASE`/`VITE_API_BASE_URL` constant and its full explanatory
+  comment, the `POST ${API_BASE}/predict` call with `FormData` field
+  `"file"`, and the `PredictResponse` shape (`prediction`, `confidence`,
+  `heatmap_png_base64`, `disclaimer` — no fields added, no per-class
+  probabilities invented, no scores made up).
+- `scripts/screenshot_frontend_predict.py` — extended with a `<mode>`
+  argument (`empty`/`result`/`error`/`mobile`) to capture all four
+  required real UI states instead of just one.
+- `docs/handoff/artifacts/frontend_redesign_{empty,result,error,
+  result_390px}.png` — new real screenshots (see below).
+- `.gitignore` — added `*.tsbuildinfo` (a real build artifact that
+  showed up untracked while verifying the build).
+- This entry.
+
+**Real results, and the honesty checks this task specifically asked for:**
+
+- **Model toggle**: checked `backend/main.py` directly before writing
+  any UI code — `/predict` takes only a `file` upload, no
+  model-selection parameter; the active model is fixed for the life of
+  the backend process via the `ASTROMINE_MODEL_TYPE` environment
+  variable, not chosen per request. The toggle is rendered **disabled**
+  (verified via Playwright: `btn.is_disabled()` → `True` for both
+  buttons) with `title="Backend serves one model"` on the group
+  (verified: the real attribute value). Not faked.
+- **Method name**: since the toggle has no real effect on which model
+  runs, the heatmap's method label is NOT derived from it — it shows the
+  generic, honest "Explanation heatmap" rather than claiming "Grad-CAM"
+  or "Attention rollout" based on a choice the backend doesn't honor.
+- **No per-class probability bars** — the API does not return them;
+  none were invented. Flagged here as a possible backend follow-up, not
+  built around.
+- **Real screenshots, not mocked**: `empty` (initial page load),
+  `result` (a real crop — `0007112__VIR_VIS_1B_1_370617178.png` —
+  uploaded, a real backend prediction `diogenite_like` at real 44.2%
+  confidence, a real Grad-CAM heatmap overlay rendered), `error` (a
+  *real* backend 503 — the running backend was temporarily restarted
+  with `ASTROMINE_CHECKPOINT` pointed at a nonexistent path so the real,
+  existing "no checkpoint found" code path fired, not an incidental
+  image-decode crash — the rendered error body is the backend's real
+  `detail` string verbatim, confirmed via `page.locator(".error-body").inner_text()`),
+  and `result_390px` (the result view at a 390px viewport — confirmed no
+  horizontal overflow, all panels/buttons/text reflow correctly).
+- One apparent visual anomaly was investigated and ruled out, not
+  assumed: two words in the empty-state hint text appeared a different
+  color than the rest of the sentence in the full-page screenshot.
+  Checked directly via `getComputedStyle` (uniform `rgb(154, 166, 181)`
+  across the whole paragraph) and a cropped, zoomed screenshot of just
+  that text (confirmed visually uniform) — a compression/downscaling
+  artifact in the preview image, not a real CSS bug. Reported here so
+  it isn't rediscovered.
+
+**Verified how:**
+
+- `npx tsc -b` and `npm run build` (full `tsc -b && vite build`) both
+  run directly — real pass, not assumed (bundle: ~149 KB JS / 5.6 KB CSS
+  gzip: ~48 KB / ~1.7 KB).
+- `git diff frontend/package.json frontend/package-lock.json`: empty —
+  confirmed no new npm dependencies.
+- Backend + frontend dev servers actually started
+  (`uvicorn`/`npm run dev`); all four screenshots taken against the real
+  running stack via Playwright (already installed from the Month 2
+  engineering pipeline work), each with `console_errors` checked and
+  reported (all clean except the error-state screenshot's expected
+  browser-level network log of its own real 503, not a JS error).
+- A real, previously-seen gotcha recurred and was caught, not missed: a
+  stray local `npm run dev` child process survived its wrapping shell
+  being stopped (npm doesn't forward `SIGTERM`) and briefly shadowed
+  `localhost:5173`'s real port-5173 listener on `[::1]`; caught via
+  `netstat -ano` and cleared with a direct `taskkill` on that PID before
+  trusting any screenshot.
+- `git diff --stat -- backend/ ml/ docs/month1_log.md`: empty — confirmed
+  out-of-scope areas untouched.
+- `python -m pytest tests/ -q`: 39/39 passing (frontend-only change; no
+  Python code touched, run as a sanity check anyway).
+
+**What was NOT done:**
+
+- The model toggle is not wired to anything real — it cannot be, since
+  the backend has no per-request model parameter to wire it to. If that
+  capability is ever added to `backend/main.py` (out of scope here), the
+  one place to revisit is the `BACKEND_HONORS_MODEL_CHOICE` constant and
+  the `methodName` derivation in `App.tsx` — both are written to flip
+  over cleanly once that's true.
+- Per-class probability bars were not added (API doesn't return them).
+- Docker was not rebuilt/re-verified for this change — verification used
+  the dev servers directly (`npm run dev` + `uvicorn`), not
+  `docker compose up`. The existing Docker wiring (`VITE_API_BASE_URL`
+  etc., verified in the Month 2 engineering work) is unaffected by this
+  purely-presentational change, but it was not re-run here.
+
+**Open issues / blockers:**
+
+- None that block this task. The `BACKEND_HONORS_MODEL_CHOICE = false`
+  constant in `App.tsx` is the one piece of debt this redesign
+  introduces: a real backend enhancement (per-request model selection)
+  would need a corresponding frontend change to actually use the toggle,
+  not just display it.
+
+**Branch/commit:** `final/frontend-redesign`, this entry's own commit,
+pushed: yes. Pull request opened to `main`, not merged.

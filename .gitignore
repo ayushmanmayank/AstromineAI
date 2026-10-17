@@ -27,6 +27,7 @@ dist/
 htmlcov/
 node_modules/
 logs/
+*.tsbuildinfo
 
 # Data and model artifacts
 datasets/*
