@@ -19,6 +19,12 @@ tensorboard>=2.16
 # ml/data/spatial_alignment.py, ml/data/spectral_labeling.py)
 astropy>=6.0
 
+# Global-mosaic dataset (ml/data/mosaic_*.py): GeoTIFF reading for the USGS
+# FC mosaic (the VIR PDS3 mosaic rasters are read with a hand-written
+# binary reader, matching this project's existing PDS3 QUBE-reading
+# convention, not a new dependency).
+rasterio>=1.3
+
 # Backend
 fastapi>=0.110
 uvicorn[standard]>=0.29

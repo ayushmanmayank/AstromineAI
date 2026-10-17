@@ -1,0 +1,46 @@
+{
+  "fc_mosaic": [
+    {
+      "url": "https://planetarymaps.usgs.gov/mosaic/Vesta_Dawn_FC_HAMO_Mosaic_Global_74ppd.tif",
+      "local_path": "datasets\\mosaic\\raw\\fc\\Vesta_Dawn_FC_HAMO_Mosaic_Global_74ppd.tif",
+      "size_bytes": 356659263,
+      "sha256": "e7a5dab2924ed590947230e70b11fd42e61e6582f94c01180ddb64b3a9f86ff4",
+      "status": "OK",
+      "note": "USGS Astrogeology FC HAMO global mosaic, 74.1778 px/deg, simple cylindrical, positive-east -180..180, Claudia-Double-Prime-aligned (Claudia crater at 146E)."
+    }
+  ],
+  "vir_mosaics": [
+    {
+      "url": "https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_2/DATA/VMT_MOSAIC-BI_CENTER_1.IMG",
+      "local_path": "datasets\\mosaic\\raw\\vir\\VMT_MOSAIC-BI_CENTER_1.IMG",
+      "size_bytes": 513601248,
+      "sha256": "d592a0593929d1dabc2f08fc4e36ecb5dc45776531e546cc879585124bbed469",
+      "status": "OK",
+      "note": "DAWN-A-VIR-5-DDR-MOSAIC-V1.0 (Band I center), self-labeled PDS3 IMG, equirectangular, planetocentric, positive-east, CENTER_LONGITUDE=180 (label scale)."
+    },
+    {
+      "url": "https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_2/DATA/VMT_MOSAIC-BI_DEPTH_1.IMG",
+      "local_path": "datasets\\mosaic\\raw\\vir\\VMT_MOSAIC-BI_DEPTH_1.IMG",
+      "size_bytes": 513601248,
+      "sha256": "4697633d52ee4cde037485c36e0d4fb40cc12d1a11685666ea7d99946cf0b62f",
+      "status": "OK",
+      "note": "DAWN-A-VIR-5-DDR-MOSAIC-V1.0 (Band I depth), self-labeled PDS3 IMG, equirectangular, planetocentric, positive-east, CENTER_LONGITUDE=180 (label scale)."
+    },
+    {
+      "url": "https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_2/DATA/VMT_MOSAIC-BII_CENTER_1.IMG",
+      "local_path": "datasets\\mosaic\\raw\\vir\\VMT_MOSAIC-BII_CENTER_1.IMG",
+      "size_bytes": 513601248,
+      "sha256": "dccca102474b77dbd6dcafde5d9ce7c40e1469ee508438f28d294aed3433d6f6",
+      "status": "OK",
+      "note": "DAWN-A-VIR-5-DDR-MOSAIC-V1.0 (Band II center), self-labeled PDS3 IMG, equirectangular, planetocentric, positive-east, CENTER_LONGITUDE=180 (label scale)."
+    },
+    {
+      "url": "https://sbnarchive.psi.edu/pds3/dawn/vir/DWNVVIR_2/DATA/VMT_MOSAIC-BII_DEPTH_1.IMG",
+      "local_path": "datasets\\mosaic\\raw\\vir\\VMT_MOSAIC-BII_DEPTH_1.IMG",
+      "size_bytes": 513601248,
+      "sha256": "31e5ba7b00d90a1768c4fe1b2fae4320dd66c62615fa602a061ff7cc7111d1a0",
+      "status": "OK",
+      "note": "DAWN-A-VIR-5-DDR-MOSAIC-V1.0 (Band II depth), self-labeled PDS3 IMG, equirectangular, planetocentric, positive-east, CENTER_LONGITUDE=180 (label scale)."
+    }
+  ]
+}

@@ -36,6 +36,15 @@ trained_models/*
 uploads/*
 !uploads/.gitkeep
 
+# Global-mosaic dataset: the raw/processed rasters and tiles are large
+# and regenerable (via scripts/mosaic_acquire.py + its real, documented
+# URLs) -- gitignored like the rest of datasets/. Its manifests (real
+# URLs + sha256 + size, no raster bytes) are the one thing meant to be
+# committed, per that task's explicit instruction.
+!datasets/mosaic
+datasets/mosaic/*
+!datasets/mosaic/manifests
+
 # OS and editor files
 .DS_Store
 Thumbs.db
