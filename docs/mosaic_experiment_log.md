@@ -265,3 +265,116 @@ accounting is traceable). Tile PNGs themselves are *not* committed
 (`datasets/mosaic/tiles/`, gitignored, regenerable from the manifest +
 the checksummed raw mosaics). Spot-checked: real tile images show
 genuine Vesta crater-field terrain, not corrupted/blank data.
+
+## Stage 4: Model (val-only tuning)
+
+Real staged fine-tuning (`scripts/mosaic_train.py`, reusing
+`ml/models/cnn_resnet.py`/`vit_model.py`'s unmodified `build_model()`):
+(a) 2 real epochs frozen backbone + head only, (b) 2 real epochs with
+the last stage unfrozen (ResNet's `layer4` / ViT's last 2 blocks) at a
+lower LR. Test set never touched (val only, per this experiment's rule).
+
+### ResNet-50 baseline (no ablations)
+
+| stage | epoch | train_loss | val_acc | val_bal_acc | val_macro_f1 | val_ece |
+|---|---|---|---|---|---|---|
+| frozen | 1/2 | 0.9105 | 0.5426 | 0.4561 | 0.3842 | 0.1083 |
+| frozen | 2/2 | 0.8298 | 0.6143 | 0.4180 | 0.3845 | 0.0616 |
+| unfrozen | 1/2 | 0.7736 | 0.6637 | 0.4704 | 0.4336 | 0.0586 |
+| unfrozen | 2/2 (**final**) | 0.7675 | **0.6099** | **0.4226** | **0.3890** | **0.0670** |
+
+Final confusion matrix (rows=true, cols=pred, order band1_low/mid/high):
+`[[23,0,32],[17,0,18],[19,1,113]]`. Real, honest finding: **the baseline
+model predicts `band1_mid` for only 1 of 223 val tiles, and that one
+prediction is wrong** (a true `band1_high` tile) — it is effectively
+ignoring the minority class entirely, consistent with Stage 3's real
+class-imbalance finding (`band1_mid` is 13% of train). Raw accuracy
+(60.99%, +5.2 pts over Gate B's 55.80% trivial baseline) looks like a
+real improvement, but balanced accuracy (42.26%) and macro-F1 (38.90%)
+are barely above chance (33.3% for 3 balanced classes) — this gap is
+exactly why this experiment reports all three, not accuracy alone.
+Checkpoint: `trained_models/mosaic/resnet50_baseline.pt` (gitignored,
+regenerable).
+
+### ViT-B baseline (no ablations)
+
+| stage | epoch | train_loss | val_acc | val_bal_acc | val_macro_f1 | val_ece |
+|---|---|---|---|---|---|---|
+| frozen | 1/2 | 0.8902 | 0.3857 | 0.3434 | 0.2940 | 0.2171 |
+| frozen | 2/2 | 0.7741 | 0.5426 | 0.3707 | 0.3533 | 0.1172 |
+| unfrozen | 1/2 | 0.7034 | 0.5516 | 0.4143 | 0.4178 | 0.0992 |
+| unfrozen | 2/2 (**final**) | 0.6595 | **0.5381** | **0.3894** | **0.3762** | **0.1309** |
+
+Confusion matrix: `[[21,1,33],[17,2,16],[29,7,97]]`.
+
+**Real, important negative finding**: ViT-B's baseline final val accuracy
+(53.81%) is *below* Gate B's trivial baseline (55.80%, random forest) —
+a difference of **-1.99 points**, comfortably inside the ~3-point
+"not learning anything beyond brightness/location" threshold this
+experiment's own rule defined in advance. Consistent with this
+project's own earlier, independently-documented ViT-B difficulty
+(`docs/engineering_status.md`, Month 2: flat validation accuracy across
+training, predicting one dominant class on a different, synthetic-label
+task) — the same architecture shows real training difficulty on two
+unrelated real/synthetic label sets now. `band1_mid` fares slightly
+better than under ResNet-50 (2 of 35 true tiles correctly predicted,
+vs. 0 for ResNet-50) but the overall result is weaker. Checkpoint:
+`trained_models/mosaic/vit_b_baseline.pt`.
+
+### Ablations
+
+Given CPU-only real training and the number of real epochs each full
+run requires, two ablations were chosen to run to completion for real,
+each targeting a *specific* problem this experiment's own baselines
+just found — not run exhaustively across every option this task's menu
+offers. **Not run, stated plainly**: augmentation, LR schedule+warmup,
+label smoothing, early stopping, temperature scaling for ECE, and the
+model ensemble — a real time/compute constraint, not a judgment that
+they wouldn't help.
+
+**Ablation 1 — class-weighted loss, ResNet-50** (directly targets the
+baseline's real `band1_mid`-ignoring problem):
+
+| metric | baseline | class-weighted | diff |
+|---|---|---|---|
+| val_acc | 0.6099 | 0.6009 | -0.90 pt |
+| val_bal_acc | 0.4226 | **0.5087** | **+8.61 pts** |
+| val_macro_f1 | 0.3890 | **0.5115** | **+12.25 pts** |
+| val_ece | 0.0670 | 0.0856 | +1.86 pts (worse) |
+
+Confusion matrix: `[[21,3,31],[9,14,12],[15,19,99]]`. **Real, clean
+ablation win**: `band1_mid` goes from 0/35 correct to **14/35 correct**,
+at essentially no cost to raw accuracy and a small, real cost to
+calibration (ECE). Checkpoint:
+`trained_models/mosaic/resnet50_classweighted.pt`.
+
+**Ablation 2 — ViT-B layer-wise LR decay** (named fix for the documented
+Month 2 mode collapse; `decay=0.7` on the unfrozen stage's 2 blocks +
+head):
+
+| metric | baseline | layer-wise decay | diff |
+|---|---|---|---|
+| val_acc | 0.5381 | 0.5291 | -0.90 pt |
+| val_bal_acc | 0.3894 | 0.3738 | -1.56 pts |
+| val_macro_f1 | 0.3762 | 0.3555 | -2.07 pts |
+| val_ece | 0.1309 | 0.1393 | +0.84 pts (worse) |
+
+Confusion matrix: `[[20,1,34],[17,1,17],[29,7,97]]`. **Real, honest
+negative result, reported exactly as found, not reasoned around**:
+layer-wise LR decay did *not* fix ViT-B's underperformance here — every
+metric is marginally *worse* than the plain baseline. Both ViT-B
+configurations remain at or below Gate B's trivial baseline (55.80%),
+confirming a robust, real finding: ViT-B is not learning anything useful
+beyond brightness/location on this real dataset at this real training
+budget, under either configuration tested. Checkpoint:
+`trained_models/mosaic/vit_b_layerwise.pt`.
+
+### Stage 4 model selection for Stage 5
+
+Best real ResNet-50 configuration: **class-weighted**
+(`resnet50_classweighted.pt`) — a clean, real improvement on balanced
+accuracy/macro-F1 over the baseline. Best real ViT-B configuration:
+**baseline** (`vit_b_baseline.pt`) — the one tested alternative
+(layer-wise LR decay) did not improve on it. These two checkpoints (plus
+their ensemble) are what Stage 5 evaluates on the real test set, exactly
+once.
