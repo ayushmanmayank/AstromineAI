@@ -136,3 +136,74 @@ Both real sources found, downloaded, and checksummed. Real metadata
 The FC-vs-VIR longitude relationship is empirically confirmed (not
 assumed), including transparently catching and correcting a real
 analysis mistake along the way. Proceeding to Stage 2.
+
+## Stage 2: Labels (GATE B)
+
+### Step 2: fixed, committed thresholds
+
+Checked directly before deciding (not assumed to transfer): this
+project's existing pointwise literature thresholds
+(`ml/data/spectral_labeling.py`'s `BAND_I_THRESHOLDS_UM`, 0.92/0.95 —
+diogenite/howardite/eucrite-like) produce a **completely degenerate
+split** on this global, multi-phase-averaged mosaic: 1.14% / 98.86% /
+0.00% of all real valid pixels (n=99,477,029) — essentially the entire
+planet falls in the single "howardite_like" bucket under those
+thresholds. This is itself a real, reportable finding (the global
+mosaic's real Band I center dynamic range, 0.9102-0.9598 μm, is far
+narrower than individual calibrated-spectrum extractions show).
+
+**Used tertiles of this mosaic's own real distribution instead** (fixed
+and committed in `ml/data/mosaic_labels.py` *before* any model saw them):
+cut points **0.925423 μm** and **0.927530 μm**, giving real class
+fractions `band1_low` 33.25%, `band1_mid` 33.39%, `band1_high` 33.36% —
+genuinely balanced. Class names deliberately neutral (not
+diogenite/howardite/eucrite), so these are never mistaken for the
+validated pointwise scheme used elsewhere in this project.
+
+### Step 3: confound screen (GATE B), real numbers
+
+Real sample: every 20th valid VIR pixel in each axis (deterministic,
+`SAMPLE_STRIDE=20`), its real FC albedo (DN) at the same real location
+(via the confirmed FC↔VIR coordinate transform), and real latitude/
+longitude — **248,605 real points**.
+
+| class | n | mean FC albedo | mean latitude |
+|---|---|---|---|
+| band1_low | 82576 | 79.64 | -19.54° |
+| band1_mid | 83137 | 81.93 | -21.47° |
+| band1_high | 82892 | 83.10 | **-7.77°** |
+
+Real, non-trivial confounds visible directly: `band1_high` sits ~12-14°
+closer to the equator on average than the other two classes, and mean
+FC albedo increases monotonically (79.6→81.9→83.1) across the three
+classes — a real, if modest, brightness/location confound exists before
+any model is trained.
+
+**Acquisition-phase coverage fraction per class: NOT AVAILABLE.** Checked
+directly, not assumed: `DWNVVIR_2`'s own `INDEX.TAB` lists only the 4
+output band-parameter rasters, no per-pixel source/orbit/phase layer.
+Reported as genuinely unavailable rather than fabricated or silently
+dropped.
+
+**Trivial baseline** (logistic regression / random forest on
+`albedo + latitude + sin(lon) + cos(lon)` only — no image pixels, no
+deep model), real region-block (20°) split, same splitting code
+(`ml/utils/mosaic_splits.py`) Stage 3 will use for tiles:
+
+| | val accuracy | vs. majority-class rate (44.43%) |
+|---|---|---|
+| majority-class rate | 44.43% | — |
+| logistic regression | **51.94%** | **+7.51 pts** |
+| random forest | **55.80%** | **+11.37 pts** |
+
+### GATE B: real numbers reported, experiment continues
+
+A real, non-trivial trivial-baseline signal exists (+7.5 to +11.4 points
+over majority-class) from brightness/location alone. This is not itself
+a stop condition — GATE B's own requirement is to report this number
+plainly, which is done here — but it sets the real bar Stage 4/5's deep
+models must clear by a meaningful margin to demonstrate they are
+learning something beyond brightness/location; per this experiment's own
+rule, if a later deep model lands within ~3 points of the random-forest
+number above (55.80%), that will be reported as "not learning anything
+beyond brightness/location," not reasoned around. Proceeding to Stage 3.

@@ -164,6 +164,20 @@ def vir_lonlat_to_pixel(label: Pds3MosaicLabel, claudia_lon_deg: float, lat_deg:
     return line, sample
 
 
+def vir_pixel_to_lonlat(label: Pds3MosaicLabel, line: float, sample: float) -> tuple[float, float]:
+    """Inverse of vir_lonlat_to_pixel(): real VIR pixel -> real
+    Claudia-Double-Prime longitude (same frame FC's file natively uses)
+    + latitude. Used to look up the corresponding FC pixel for a given
+    real VIR pixel (confound screening, resampling)."""
+    label_lon_deg = (
+        (sample - label.sample_projection_offset_px - 1) / (_VIR_LON_SIGN * label.map_resolution_px_per_deg)
+        + label.center_longitude_deg
+    )
+    claudia_lon_deg = (label_lon_deg - _VIR_LABEL_LON_OFFSET_DEG) % 360.0
+    lat_deg = label.center_latitude_deg - (line - label.line_projection_offset_px - 1) / label.map_resolution_px_per_deg
+    return claudia_lon_deg, lat_deg
+
+
 # --------------------------------------------------------------------------
 # FC: USGS GeoTIFF global mosaic
 # --------------------------------------------------------------------------
