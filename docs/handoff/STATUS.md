@@ -1000,3 +1000,80 @@ labeling attempted.
 
 **Branch/commit:** `month1-data-pipeline`, this entry's own commit (see
 `git log` on this branch — "Month 1 Slice 16"), pushed: yes.
+
+---
+
+## Session 10 — 2026-10-17 — project closeout
+
+**Task attempted:** Close the project out — documentation, merge, and
+cleanup only. Per scope: no new data acquisition, no real compositional
+labeling, and `compute_band_center_v2()`, the specificity penalty, the
+longitude standardization, and `ml/utils/splits.py` untouched.
+
+**What actually changed:**
+
+- Created `final/closeout` from `month1-data-pipeline` (`0033a02`) and
+  merged `month2-engineering` (`cb161dd`) into it — **zero conflicts**:
+  `month2-engineering` never touched `docs/month1_log.md` or this file,
+  only added its own `docs/engineering_status.md`, so both branches'
+  real content is present with nothing lost and nothing reordered.
+- `docs/FINAL_REPORT.md` — new file: abstract, background/research
+  question (from `README.md`'s own stated scope and
+  `docs/month2_log.md`/`month3_log.md`'s originally-planned,
+  never-reached scope — no separate "proposal" document was found
+  committed anywhere in this repo to cite directly, stated plainly
+  rather than invented), data/provenance, methods, the full real
+  Slice 10-16 results (every table copied from `docs/month1_log.md`,
+  not recomputed), the engineering system (labelled synthetic
+  throughout), limitations, and future work.
+- `README.md` — fully rewritten: what the project is, the negative
+  result stated as plainly as the logs state it, real repo layout,
+  real reproduce/demo commands, pointer to `docs/FINAL_REPORT.md`.
+- `ml/data/spatial_alignment.py` — the one optional fix taken: corrected
+  the alignment-summary log line's format-string argument-count mismatch
+  (previously printed a nonsensical "N VIR candidates" reusing the
+  time-window-hours value) to accurately describe the single real
+  candidate-pair count actually being tracked. **Nothing else in that
+  file touched.**
+- This entry.
+
+**Real results:**
+
+- Merge: clean, no conflicts, verified by `grep`-listing every
+  `## Session`/`## Slice` header in both files before and after — all
+  present, all in order.
+- The optional logging fix was verified, not assumed: `sample_metadata.csv`
+  backed up before the change (md5 `f1ecac08fe554591414cd37f0814f42a`),
+  `align_dataset()` re-run in full afterward on the same real manifests,
+  and the regenerated CSV's md5 and a full `diff` both confirmed
+  **byte-for-byte identical** to the pre-fix file — the fix changes only
+  a human-readable log line, nothing in the real output. The corrected
+  log now reads "106298 candidate pairs fell inside the 24.0h time
+  window" (previously the nonsensical "106298 FC x 24 VIR candidates").
+- `python -m pytest tests/ -q`: **39/39 passing** on `final/closeout`
+  after the merge and the logging fix.
+
+**Verified how:**
+
+- `git log --oneline` on both source branches before merging, to confirm
+  the exact commits (`0033a02`, `cb161dd`) this task's brief named.
+- Every number copied into `docs/FINAL_REPORT.md` was checked against
+  its source table in `docs/month1_log.md`/`docs/engineering_status.md`
+  directly (`grep`/`sed` extracts reproduced in this session), not typed
+  from memory.
+- The optional fix's byte-identical claim is backed by an actual md5sum
+  + `diff` comparison of the real regenerated file against a real backup
+  of the pre-fix file, not asserted from reading the code change alone.
+
+**Open issues / blockers:**
+
+- None new. This entry documents a closeout, not a finding — the
+  project's substantive open items are exactly the ones named in
+  `docs/FINAL_REPORT.md`'s "Future work" section (a band-center method
+  robust to the confidence confound; an acquisition design that
+  decorrelates session timing from any candidate signal; the
+  `splits.py` spectrum-grouping gap; the `pds_acquisition.py` manifest
+  dedup-on-write gap).
+
+**Branch/commit:** `final/closeout`, this entry's own commit, pushed:
+yes. Pull request opened to `main`, not merged.

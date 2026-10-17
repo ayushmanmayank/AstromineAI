@@ -716,9 +716,9 @@ def align_dataset(
             ))
 
     logger.info(
-        "Alignment: %d FC x %d VIR candidates fell inside the %.1fh time window; "
+        "Alignment: %d candidate pairs fell inside the %.1fh time window; "
         "%d pairs had computable overlap; %d/%d survived confidence >= %.2f",
-        n_candidates_in_time_window, max_time_delta_hours, max_time_delta_hours,
+        n_candidates_in_time_window, max_time_delta_hours,
         n_scored, len(survivors), n_scored, min_confidence,
     )
     return survivors
