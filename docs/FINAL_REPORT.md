@@ -343,6 +343,110 @@ silently returned the frontend's own HTML shell instead of the backend's
 JSON — fixed with a build-time `VITE_API_BASE_URL`, re-verified with a
 real Playwright run against the actual rebuilt container.
 
+## Global-mosaic experiment (`final/mosaic-dataset`, post-closeout)
+
+A later, separate experiment, branched off this closeout
+(`final/closeout` → `final/mosaic-dataset`) and documented in full in
+`docs/mosaic_experiment_log.md`. It does not touch or revise anything
+above — month1's real spectral-crop pipeline, its CONFIRMED NEGATIVE
+verdict, or the Month 2 engineering system are all unchanged. It asks a
+different, narrower question: can a deep image model, trained on FC
+global-mosaic tiles, learn to predict coarse VIR Band I center bins
+better than a trivial brightness/location baseline, under a
+leakage-safe (region-block) split?
+
+**What the labels measure, stated plainly, as in every other section of
+this report: Band I (pyroxene absorption) center-wavelength TERTILE
+bins of the real VIR global mosaic (`ml/data/mosaic_labels.py`) — not
+a validated mineral-composition classification.** Reusing this
+project's own existing literature pointwise thresholds
+(diogenite/howardite/eucrite, 0.92/0.95 µm) on this global raster was
+tried first and produces a degenerate 1.14% / 98.86% / 0.00% split;
+tertiles of the mosaic's own real distribution were used instead, and
+the resulting class names (`band1_low`/`band1_mid`/`band1_high`) were
+deliberately kept neutral so they are never mistaken for the validated
+pointwise scheme used elsewhere in this project.
+
+**Pipeline, gated at every stage**: real FC HAMO (USGS, 74.18 px/deg)
+and real VIR Band I/II derived mosaics (`sbnarchive.psi.edu`
+`DAWN-A-VIR-5-DDR-MOSAIC-V1.0`) acquired with recorded sha256/size
+(Gate A pass); the FC/VIR longitude sign relationship was resolved
+empirically against Rheasilvia's literature-documented diogenite
+signature (not assumed — an initial test that omitted the real
+Claudia-frame offset got the sign wrong and was caught and corrected
+before being relied on); labels fixed and committed before any model
+code; a confound screen (Gate B) trained a trivial baseline (logistic
+regression / random forest on per-pixel albedo + lat/lon, real
+region-block split) *before* any deep model, finding it already beats
+the real majority-class rate (44.43%) by **+11.37 points** (55.80%
+random forest) — i.e., mean FC albedo and latitude alone carry real
+signal about these VIR tertile bins, the exact confound this report's
+month1 track also had to repeatedly rule out for a different question.
+1,494 real 224×224 FC tiles were cut and region-block split (20°
+blocks, one-tile buffer, 70/15/15) to prevent spatial leakage between
+train/val/test.
+
+**Stage 4 (val-only tuning)**: staged transfer learning (ResNet-50,
+ViT-B, ImageNet-pretrained, frozen-then-unfrozen) with 2 targeted
+ablations run to completion — class-weighted loss for ResNet-50 (real
+win: val balanced accuracy +8.61 pts, macro-F1 +12.25 pts over baseline,
+at a small real calibration cost) and layer-wise LR decay for ViT-B
+(real, honest negative result: every metric slightly worse than
+baseline, so the named fix for Month 2's documented ViT mode collapse
+did not transfer to this dataset). Augmentation, LR
+schedule/warmup, label smoothing, early stopping, and temperature
+scaling were not run, stated plainly as a real compute/time constraint,
+not a judgment.
+
+**Stage 5 (real test set, touched exactly once)** — 222 real test
+tiles (`band1_low`=96, `band1_mid`=27, `band1_high`=99; majority-class
+rate 44.59%):
+
+| model | n | accuracy | balanced accuracy | macro-F1 | ECE |
+|---|---|---|---|---|---|
+| Trivial baseline (RF: albedo + lat/lon, refit on tiles) | 222 | 0.7162 | **0.5530** | **0.5374** | 0.1190 |
+| ResNet-50 (class-weighted) | 222 | 0.5180 | 0.5067 | 0.4744 | 0.0765 |
+| ViT-B (baseline) | 222 | 0.6261 | 0.4831 | 0.4636 | 0.0791 |
+| Ensemble (averaged softmax) | 222 | 0.6216 | 0.5056 | 0.5072 | 0.0700 |
+
+Confusion matrices (rows=true, cols=predicted,
+`[band1_low, band1_mid, band1_high]`): trivial baseline
+`[[82,2,12],[1,1,25],[16,7,76]]`; ResNet-50 (class-weighted)
+`[[26,11,59],[4,13,10],[13,10,76]]`; ViT-B (baseline)
+`[[58,0,38],[17,1,9],[18,1,80]]`; ensemble
+`[[48,2,46],[11,4,12],[13,0,86]]`.
+
+**Real, honest finding, not worked around**: on the real held-out test
+set, no deep model beats the real trivial baseline on balanced accuracy
+or macro-F1 — the metrics this experiment deliberately reports
+alongside raw accuracy for exactly this reason. ViT-B's raw accuracy
+(0.6261) looks like the second-best number, but its balanced accuracy
+(0.4831) is the *worst* of the four, because it predicts `band1_mid`
+almost never (1 of 27 correct) — a majority-class-dominated failure
+mode that raw accuracy alone would have hidden. Grad-CAM (ResNet-50)
+and attention rollout (ViT-B), run on 6 real test tiles (all
+`band1_low` by manifest order, a disclosed sampling limitation, not a
+cherry-pick), show Grad-CAM's brightest region consistently sitting on
+the same bright albedo/shading ridge that is the most visually
+prominent brightness feature in each raw tile — consistent with the
+model tracking brightness/shading rather than an independently
+compositional signal. ViT-B's attention rollout is diffuse and
+corner-biased, consistent with its underperformance and this project's
+separately documented ViT attention concerns.
+
+**Conclusion**: at this real training budget, on this real tiling and
+labeling scheme, a deep image model does not demonstrably learn these
+VIR Band I tertile classes any better than a simple brightness +
+location statistic — and on the real test set, slightly worse on the
+metrics that matter most given the class imbalance. This strengthens,
+rather than contradicts, this report's central finding above: apparent
+signal in Dawn-derived spectral/compositional groupings on Vesta needs
+to survive a real confound screen before being called a model result,
+and in both the month1 spectral-crop track and this later image-tiling
+experiment, it did not. Full real numbers, logs, and the acquisition/
+label/split/training provenance for every claim above are in
+`docs/mosaic_experiment_log.md`.
+
 ## Limitations and honest scope statement
 
 - **This is a negative result for the compositional-signal question as

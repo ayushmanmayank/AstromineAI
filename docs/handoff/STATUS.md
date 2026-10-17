@@ -1077,3 +1077,123 @@ longitude standardization, and `ml/utils/splits.py` untouched.
 
 **Branch/commit:** `final/closeout`, this entry's own commit, pushed:
 yes. Pull request opened to `main`, not merged.
+
+---
+
+## Session 11 — 2026-10-17 — global-mosaic dataset experiment (`final/mosaic-dataset`)
+
+**Task attempted:** Download, build labels, split, train, and improve a
+deep image-classification pipeline against the real FC/VIR Vesta global
+mosaics, branched off `final/closeout`. Non-negotiable rules per task
+brief: no visual-heuristic labels (VIR band-parameter mosaics only),
+thresholds fixed and committed before any training, test set touched
+exactly once at the end, region-block (>=20 deg) splits only, no
+accuracy target promised or worked around, and `docs/month1_log.md`,
+`datasets/metadata/sample_metadata.csv`, `ml/data/spatial_alignment.py`,
+`ml/utils/splits.py` never touched (confirmed empty diff before every
+commit in this branch).
+
+**What actually changed (5 stages, each gated, all real):**
+
+- **Stage 1 (Gate A, PASS):** real FC HAMO mosaic (USGS, 356,659,263
+  bytes) and real VIR Band I/II center+depth derived mosaics
+  (`sbnarchive.psi.edu`, `DAWN-A-VIR-5-DDR-MOSAIC-V1.0`, 4 files,
+  513,601,248 bytes each) downloaded with recorded sha256/size in
+  `datasets/mosaic/manifests/acquisition_manifest.json`. The FC/VIR
+  longitude-sign relationship was resolved empirically against
+  Rheasilvia's literature-documented diogenite signature, not assumed —
+  an initial test run **without** the real Claudia-frame offset applied
+  first got the sign wrong (`+1`); re-run with the offset applied first
+  correctly gave `-1`, caught and fixed before being relied on anywhere
+  downstream (`ml/data/mosaic_reader.py`, `scripts/mosaic_crater_check.py`).
+- **Stage 2 (Gate B):** fixed, committed-before-training label
+  thresholds in `ml/data/mosaic_labels.py` (tertiles of the mosaic's own
+  Band I center distribution — reusing this project's existing
+  diogenite/howardite/eucrite pointwise thresholds here was tried first
+  and found to produce a degenerate 1.14%/98.86%/0.00% split, documented
+  in that module's docstring rather than silently discarded). Confound
+  screen (`scripts/mosaic_confound_screen.py`) found a trivial baseline
+  (logistic regression / random forest on albedo+lat/lon, real
+  region-block split) already beats the real majority-class rate
+  (44.43%) by **+11.37 points** (55.80%, random forest) — recorded
+  before any deep model was trained.
+- **Stage 3:** 1,494 real 224x224 FC tiles cut and labeled by majority
+  real VIR class (`scripts/mosaic_tile.py`), region-block (20 deg) split
+  with a one-tile buffer (`ml/utils/mosaic_splits.py`, 9 new tests, all
+  passing) — train=1049, val=223, test=222.
+- **Stage 4 (val-only tuning):** staged transfer learning (ResNet-50,
+  ViT-B, frozen-then-unfrozen). Two targeted ablations run to
+  completion: class-weighted loss for ResNet-50 (real win: val balanced
+  accuracy +8.61 pts, macro-F1 +12.25 pts) and ViT-B layer-wise LR decay
+  (real, honest negative result — every metric slightly worse than
+  baseline; did not fix the Month-2-documented mode collapse).
+  Augmentation, LR schedule/warmup, label smoothing, early stopping, and
+  temperature scaling were not run — a stated real compute/time
+  constraint, not a judgment.
+- **Stage 5 (real test set, touched exactly once,
+  `scripts/mosaic_evaluate_test.py`):** on 222 real test tiles, **no
+  deep model beat the real trivial baseline on balanced accuracy or
+  macro-F1** (trivial 0.5530/0.5374 vs. ResNet-50 class-weighted
+  0.5067/0.4744, ViT-B baseline 0.4831/0.4636, ensemble 0.5056/0.5072).
+  ViT-B's raw accuracy (0.6261) looked second-best but its balanced
+  accuracy was the worst of the four (predicts `band1_mid` almost
+  never). Grad-CAM/attention rollout on 6 real test tiles showed
+  Grad-CAM consistently highlighting the same bright albedo/shading
+  ridge that is the most visually prominent brightness feature in each
+  raw tile, not an independently compositional-looking structure;
+  ViT-B's attention rollout was diffuse and corner-biased. Full numbers,
+  confusion matrices, and the explainability assessment are in
+  `docs/mosaic_experiment_log.md`'s Stage 5 section and copied verbatim
+  into `docs/FINAL_REPORT.md`'s new "Global-mosaic experiment" section.
+- Labels are clearly marked throughout (module docstring, experiment
+  log, final report) as **Band I center-wavelength TERTILE bins from
+  the real VIR mosaic, NOT a validated mineral-composition
+  classification.**
+
+**Real results:** a second, independent confirmation (different data,
+different method, different track) that apparent signal in Dawn-derived
+spectral/compositional groupings on Vesta needs to survive a real
+confound screen before being called a model result — here, it did not:
+the deep models do not demonstrably learn these VIR tertile classes
+better than a simple brightness + location statistic, and are slightly
+worse on test on the metrics that matter most given the class
+imbalance.
+
+**Verified how:**
+
+- Every number in `docs/mosaic_experiment_log.md` and
+  `docs/FINAL_REPORT.md`'s new section was copied directly from this
+  session's real script output/logs, not recomputed or rounded further.
+- `git diff --stat -- docs/month1_log.md datasets/metadata/sample_metadata.csv ml/data/spatial_alignment.py ml/utils/splits.py`
+  confirmed empty before every commit on this branch.
+- `python -m pytest tests/ -q`: **48/48 passing** (39 original + 9 new
+  `tests/test_mosaic_splits.py`).
+- Acquisition sha256/size recorded and checked against
+  `datasets/mosaic/manifests/acquisition_manifest.json` before any
+  downstream processing relied on the files.
+- `datasets/mosaic/` (raw/tiles/checks) is gitignored by design; only
+  code, the two manifests (with checksums), and docs are committed —
+  confirmed via `git status`/`git check-ignore -v` before every commit.
+
+**Open issues / blockers:**
+
+- The trivial-baseline comparison in Gate B (Stage 2) and the one in
+  Stage 5 are **not** the same split instance, disclosed in both logs:
+  Gate B's confound screen used its own coarser pixel-level sample with
+  an independently-derived region-block split, not the Stage 3 tile-level
+  split — Gate B's numbers were a pre-modeling diagnostic only and never
+  informed any choice evaluated at test time.
+- Stage 5's 6 explainability tiles are not stratified by class (all 6
+  happen to be `band1_low`, by on-disk manifest order) — disclosed
+  rather than re-sampled after the fact; a stratified re-run would be a
+  reasonable follow-up, not done here.
+- Six ablations named as allowed in the task brief (augmentation, LR
+  schedule+warmup, label smoothing, early stopping, temperature scaling)
+  were not run, for real stated compute/time reasons — not a judgment
+  that they would not help.
+- This experiment is additive and does not change this project's
+  primary, month1 negative finding or close any of the open items named
+  in `docs/FINAL_REPORT.md`'s own "Future work" section.
+
+**Branch/commit:** `final/mosaic-dataset`, this entry's own commit,
+pushed: yes. Pull request opened to `main`, not merged.

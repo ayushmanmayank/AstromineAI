@@ -378,3 +378,105 @@ accuracy/macro-F1 over the baseline. Best real ViT-B configuration:
 (layer-wise LR decay) did not improve on it. These two checkpoints (plus
 their ensemble) are what Stage 5 evaluates on the real test set, exactly
 once.
+
+## Stage 5: FINAL — real test set, touched exactly once (`scripts/mosaic_evaluate_test.py`)
+
+**What these labels measure, stated plainly one more time before any
+number below**: Band I (pyroxene absorption) center-wavelength TERTILE
+bins of the real VIR global mosaic (`ml/data/mosaic_labels.py`). **Not
+a validated mineral-composition classification** — see Stage 2's
+finding that the project's existing literature pointwise thresholds
+(diogenite/howardite/eucrite, 0.92/0.95 µm) produce a degenerate split
+on this raster and were deliberately not reused here.
+
+Test touched for the first and only time in this script, on the real
+222-tile Stage-3 test split (`band1_low`=96, `band1_mid`=27,
+`band1_high`=99; majority-class rate = 99/222 = **44.59%**). Stage 2's
+confound screen (Gate B) used a separate, coarser pixel-level sample
+(every 20th valid VIR pixel, its own independent region-block split)
+purely as a pre-modeling diagnostic — it never informed any choice
+evaluated below, but for full transparency: because `assign_block_splits`
+shuffles whatever list of unique blocks it is handed, and Stage 2 and
+Stage 3 hand it different underlying point sets, Gate B's "test" blocks
+are not guaranteed to be the identical real blocks as Stage 3's — they
+are two independently-derived splits, not one split reused twice.
+
+The trivial baseline is **refit here**, on real tile-level features
+(each test/train tile's own mean FC pixel value as "albedo", plus its
+real center lat/lon), so it is evaluated on the *identical* real test
+tiles as the deep models — a fair, apples-to-apples comparison, rather
+than reusing Gate B's differently-sampled numbers.
+
+| model | n | accuracy | balanced accuracy | macro-F1 | ECE |
+|---|---|---|---|---|---|
+| Trivial baseline (RF: albedo + lat/lon, refit on tiles) | 222 | **0.7162** | **0.5530** | **0.5374** | 0.1190 |
+| ResNet-50 (class-weighted) | 222 | 0.5180 | 0.5067 | 0.4744 | 0.0765 |
+| ViT-B (baseline) | 222 | 0.6261 | 0.4831 | 0.4636 | 0.0791 |
+| Ensemble (averaged softmax) | 222 | 0.6216 | 0.5056 | 0.5072 | 0.0700 |
+
+Confusion matrices (rows=true, cols=predicted, class order
+`[band1_low, band1_mid, band1_high]`):
+
+- Trivial baseline: `[[82, 2, 12], [1, 1, 25], [16, 7, 76]]`
+- ResNet-50 (class-weighted): `[[26, 11, 59], [4, 13, 10], [13, 10, 76]]`
+- ViT-B (baseline): `[[58, 0, 38], [17, 1, 9], [18, 1, 80]]`
+- Ensemble: `[[48, 2, 46], [11, 4, 12], [13, 0, 86]]`
+
+**Real, honest finding, stated plainly and not worked around**: on the
+real held-out test set, **no deep model beats the real trivial
+baseline on balanced accuracy or macro-F1** — the metrics this task
+asks for specifically because raw accuracy rewards majority-class
+guessing. The class-weighted ResNet-50's real Stage-4 *validation* gain
+over Gate B's trivial baseline (val_bal_acc 0.5087 vs. 0.5580, still
+behind at that point too, by a smaller margin) did **not** carry over
+to test in a way that surpasses a same-tile trivial baseline
+(0.5067 vs. 0.5530). The ensemble's balanced accuracy (0.5056) and
+macro-F1 (0.5072) are close to the trivial baseline's but still
+slightly below it on both. Raw accuracy alone would have been
+misleading here: ViT-B's 0.6261 accuracy looks like the second-best
+number in the table, but its balanced accuracy (0.4831) is the
+*worst* of the four, driven by predicting `band1_mid` almost never (1
+of 27 correct) — exactly the majority-class-dominated failure mode
+this task's "always report balanced accuracy/macro-F1 alongside raw
+accuracy" rule exists to catch.
+
+**Conclusion for this dataset, at this real training budget**: the
+deep models learn to separate these VIR Band I tertile classes using
+the FC image tiles about as well as a simple brightness + location
+statistic already does, and on the real test set, not quite as well.
+This is consistent with, and strengthens, this project's overall
+cross-track finding (Slice 16, month1-data-pipeline) that apparent
+spectral-cluster signal in this kind of data needs to be checked
+against simple confounds before being called a model achievement.
+
+### Explainability on 6 real test tiles (Grad-CAM / attention rollout)
+
+Reused `ml/explainability/gradcam.py`'s `generate_gradcam()` (ResNet-50,
+`layer4`) and `ml/explainability/attention_viz.py`'s
+`vit_attention_rollout()` (ViT-B), both unmodified, against the trained
+checkpoints above. **Real limitation, stated plainly**: the 6 tiles are
+simply the first 6 rows of the test split in `tile_manifest.csv`'s
+on-disk order, not a stratified sample — all 6 happen to be
+`band1_low` (both models correctly predicted `band1_low` on all 6).
+This is a real artifact of not having stratified the explainability
+sample, not a cherry-pick; it is disclosed here rather than silently
+re-sampled after the fact. Images: `docs/handoff/artifacts/mosaic_explainability/tile_{00005,00006,00007,00014,00015,00016}_base_gradcam_rollout.png`
+(left: input tile; middle: Grad-CAM; right: attention rollout).
+
+**Honest visual assessment**: in every one of the 6 tiles, the Grad-CAM
+heatmap's brightest region sits directly on the same bright
+curved ridge / albedo-edge feature that is visually the most prominent
+brightness transition in the raw FC tile (a crater-rim-like bright
+crescent against darker terrain) — not on some other, independently
+compositional-looking structure. This is consistent with Grad-CAM
+tracking real brightness/shading edges in the input rather than an
+independent compositional signal, which is exactly the kind of confound
+this whole project (both tracks) has repeatedly found and reported
+rather than assumed away. The ViT-B attention rollout maps are diffuse
+and dominated by a small number of isolated, often corner- or
+edge-biased patches with no visible structured relationship to the
+bright ridge feature Grad-CAM and the raw image agree on — consistent
+with the ViT-B underperformance and the Month 2 engineering track's own
+documented attention/mode-collapse concerns for this architecture, and
+providing no basis here for claiming the ViT-B arm is attending to
+compositional structure either.
