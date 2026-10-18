@@ -1197,3 +1197,119 @@ imbalance.
 
 **Branch/commit:** `final/mosaic-dataset`, this entry's own commit,
 pushed: yes. Pull request opened to `main`, not merged.
+
+---
+
+## Session 12 — 2026-10-18 — "beat the trivial baseline honestly" (`final/mosaic-v2`)
+
+**Task attempted:** Branched off `final/mosaic-dataset`, try to beat the
+trivial baseline (0.5530 balanced accuracy / 0.5374 macro-F1, the fixed
+222-tile test set's number) honestly — reusing existing code, never
+modifying any committed Stage 1-5 result/threshold from that branch,
+with 5-fold region-block CV as the new primary metric instead of a
+single fixed split.
+
+**What actually changed (5 stages, each gated/ablated as specified):**
+
+- **Stage 0 (CV infrastructure):** new `ml/utils/mosaic_cv.py` (5-fold
+  region-block CV, rotating inner val fold, 9 new tests, all passing).
+  **Central new finding**: the trivial baseline recomputed under this
+  CV is 0.7783 ± 0.0659 balanced accuracy — far higher than the old
+  fixed-split number, not a bug (zero train/val/test region-block
+  overlap, verified directly). Isolated the cause: location (lat+lon
+  alone, zero pixels) reaches 0.7215; albedo alone only 0.3690. This
+  20°-block grid is large enough that a tile's address is itself close
+  to knowing its real geologic terrane, raising the real bar for
+  everything that followed.
+- **Stage 1 (Gate C):** real FC2 color-filter mosaics (F3/F4/F5,
+  749/917/965nm, `sbnarchive.psi.edu`) acquired after catching and
+  correcting an initial wrong wavelength-table assumption via a
+  byte-range label probe; longitude sign re-verified empirically
+  (opposite of VIR's, confirmed not assumed). Gate result: color-ratio
+  features do not beat albedo+lat/lon by more than 1 CV std
+  (−0.0258 points) — no extra signal, continued to Stage 2 on
+  single-band data per this gate's own rule.
+- **Stage 2:** 6 real, head-only (frozen backbone, 2-epoch, 5-fold-CV
+  budget — a stated compute trade-off) variants: plain ResNet-50
+  (0.4530), plain ViT-B (0.4579), albedo-normalized ResNet-50 (0.4698)
+  and ViT-B (0.4500), a frozen-ImageNet-embedding hybrid (0.5630, real
+  negative — worse than albedo+lat/lon alone), and a residual model
+  with real side inputs concatenated before the classifier (**0.4913**,
+  the best image-using configuration, though still far below the
+  trivial baseline).
+- **Stage 3:** 2 targeted ablations against the Stage 2 winner:
+  class-weighted loss (real, clean win: **0.5637 ± 0.0403**, replicating
+  `final/mosaic-dataset`'s own finding under a different protocol) and
+  augmentation (real, clean loss: 0.4785, worse than the plain residual
+  baseline). Per this task's "don't stack more than what wins
+  individually" rule, only class-weighting carries forward.
+- **Stage 4 (2-class task, optional, reported separately):** thresholds
+  reused unchanged from `final/mosaic-dataset`'s committed tertiles
+  (`ml/data/mosaic_labels_v2.py`, committed before any training on it).
+  Winning config reaches 0.6059 ± 0.1027 on the easier task, but falls
+  *further* behind its own, even-higher trivial baseline (0.9391 ±
+  0.0349, a −0.3332pt gap vs. the 3-class task's −0.2146).
+- **Stage 5:** real Grad-CAM (reused `ml/explainability/gradcam.py`
+  unmodified) on 12 real test tiles stratified by true class, against
+  one real checkpoint trained for this purpose (CV trains a fresh model
+  per fold, so there is no single "the" model otherwise). Honest
+  finding: heatmaps are coarse, structurally similar, largely
+  content-independent across very different real tiles — unlike
+  `final/mosaic-dataset`'s own Grad-CAM maps, which tracked a real
+  brightness ridge. Consistent with the residual model's real power
+  coming from its side-input branch, not the CNN branch.
+- README.md updated with a summary of the accuracy numbers and the new
+  CV finding; `docs/FINAL_REPORT.md` gained a new "Mosaic v2: removing
+  the brightness shortcut" section with the one-sentence verdict this
+  task's own Stage 5 instruction requires.
+
+**Real, final verdict, stated plainly**: **no** — nothing tested in
+this branch beat the real CV trivial baseline by more than its own
+standard deviation, on either the 3-class task (0.5637 ± 0.0403 vs.
+0.7783 ± 0.0659) or the 2-class task (0.6059 ± 0.1027 vs. 0.9391 ±
+0.0349). A second, independent, more rigorously-measured confirmation
+that this data's real signal is overwhelmingly positional, not
+something a deep vision model recovers from pixels beyond a simple
+location-aware baseline.
+
+**Verified how:**
+
+- `git diff --stat` against `docs/month1_log.md`,
+  `datasets/metadata/sample_metadata.csv`,
+  `ml/data/spatial_alignment.py`, `ml/utils/splits.py`,
+  `docs/mosaic_experiment_log.md`, `ml/data/mosaic_labels.py`,
+  `ml/data/mosaic_reader.py` confirmed empty before every commit on
+  this branch.
+- `python -m pytest tests/ -q`: **56/56 passing** throughout (48 prior +
+  8 new `tests/test_mosaic_cv.py`).
+- A real bug (the 2-class task's CV summary line compared against the
+  wrong, 3-class trivial-baseline constant) was caught by a smoke test
+  before Stage 4 relied on it, and fixed.
+- Every real number in `docs/mosaic_v2_log.md` and
+  `docs/FINAL_REPORT.md`'s new section was copied directly from this
+  session's real script output, not recomputed or rounded further.
+- Real FC2 color-mosaic sha256/size recorded in
+  `datasets/mosaic/manifests/color_acquisition_manifest.json` before
+  any downstream processing relied on the files; `datasets/mosaic/`
+  (raw/scratch/checks) stays gitignored, only code/manifests/docs
+  committed.
+
+**Open issues / blockers:**
+
+- Stage 2/3's head-only (frozen-backbone) training budget is a real,
+  stated compute trade-off given 5-fold CV's 5x cost multiplier — a
+  full staged fine-tune (as `final/mosaic-dataset`'s Stage 4 used) under
+  this same CV protocol was not attempted and might change the Stage 2
+  numbers; not claimed either way.
+- 5 of the 7 ablations this task's brief named (LR schedule+warmup,
+  label smoothing, early stopping, balanced sampling/focal loss, ViT-B
+  fix attempts, temperature scaling) are implemented in
+  `scripts/mosaic_train_cv.py`'s flags but were not run, for the same
+  real compute/time reason — not a judgment that they would not help.
+- This experiment is additive and does not change this project's
+  primary, month1 negative finding, `final/mosaic-dataset`'s own
+  results, or close any item in `docs/FINAL_REPORT.md`'s "Future work"
+  section.
+
+**Branch/commit:** `final/mosaic-v2`, this entry's own commit, pushed:
+yes. Pull request opened to `main`, not merged.

@@ -447,6 +447,86 @@ experiment, it did not. Full real numbers, logs, and the acquisition/
 label/split/training provenance for every claim above are in
 `docs/mosaic_experiment_log.md`.
 
+## Mosaic v2: removing the brightness shortcut (`final/mosaic-v2`)
+
+A direct follow-up to the global-mosaic experiment above, branched off
+`final/mosaic-dataset`. It does not revise anything above; it instead
+asks the question the original experiment's single fixed test set could
+not cleanly answer: is there *any* real configuration — of label task,
+confound-removal technique, or ablation — under which a deep model
+beats a properly-measured trivial baseline on this data? Full real
+numbers, per-fold tables, and the provenance for every claim below are
+in `docs/mosaic_v2_log.md`.
+
+**The central new finding**: re-measuring the trivial baseline under
+real **5-fold region-block cross-validation** instead of one fixed
+split gives **0.7783 ± 0.0659 balanced accuracy** — far higher than the
+original experiment's single-split number (0.5530) and not a bug
+(region-block overlap between every fold's train/val/test was checked
+and is zero). Isolating why, on the identical CV folds: albedo alone
+reaches only 0.3690 and latitude alone only 0.4868, but **latitude +
+longitude together, with zero pixel data, already reach 0.7215**. At
+this task's 20°-block grid size, a tile's (lat, lon) address is itself
+close to knowing which real Vesta geologic terrane produced its label —
+this raised the real bar for every comparison that followed.
+
+**Gate C (real FC color-filter data)**: real cylindrical mosaics for
+three Dawn FC2 filters (749/917/965 nm, `sbnarchive.psi.edu`,
+empirically longitude-verified — a different sign convention than
+VIR's, confirmed rather than assumed) were acquired and tested as
+additional features. They did not beat albedo+lat/lon by more than 1
+CV standard deviation (−0.0258 points, i.e. slightly worse) — no extra
+signal found, as this gate's own rule requires when that happens.
+
+**Stage 2 (removing the brightness shortcut)** — every variant tested
+under the same 5-fold CV, head-only budget: plain ResNet-50 (0.4530),
+plain ViT-B (0.4579), per-tile albedo-normalized ResNet-50 (0.4698) and
+ViT-B (0.4500), frozen-ImageNet-embedding hybrid (0.5630), and a
+residual model with real albedo/lat/lon concatenated directly into the
+classifier (**0.4913**, the best image-using configuration). Every one
+remained far below the 0.7783 trivial baseline. Removing brightness
+specifically (the albedo-normalized variants) changed almost nothing —
+real evidence that brightness was not the shortcut being exploited in
+the first place; the real shortcut, per Stage 0's own finding, is
+location, and only the residual model (given that information
+directly) closed any of the gap.
+
+**Stage 3 (ablations against the Stage 2 winner)**: class-weighted loss
+was a real, clean win (**0.5637 ± 0.0403**, +0.0724 over the residual
+baseline, replicating `final/mosaic-dataset`'s own class-weighting
+finding under a completely different protocol); augmentation was a
+real, clean loss (0.4785, worse than even the plain residual baseline).
+**Final best real configuration for this branch: residual ResNet-50 +
+class-weighted loss, 0.5637 ± 0.0403 balanced accuracy.**
+
+**Stage 4 (2-class task, thresholds reused unchanged, reported
+separately)**: the same winning configuration reaches a higher raw
+number on the easier 2-class task (0.6059) but falls *further* behind
+its own trivial baseline (0.9391, a −0.3332 point gap vs. the 3-class
+task's −0.2146) — simplifying the task did not help the deep model
+catch up.
+
+**Stage 5 (explainability)**: real Grad-CAM on 12 real test tiles,
+stratified 4 per true class, against the final winning checkpoint.
+Honest finding: the heatmaps are coarse, structurally similar,
+largely content-independent patterns across tiles with very different
+real terrain — unlike the original experiment's Grad-CAM maps, which
+consistently tracked a real, visible brightness ridge. This is
+consistent with the residual model's real predictive power coming
+overwhelmingly from its side-input branch, not from content-dependent
+visual features.
+
+**Verdict, stated in one sentence as this stage's own instruction
+requires**: **no** — nothing tested in this branch beat the real CV
+trivial baseline by more than its own standard deviation, on either the
+3-class task (best real result 0.5637 ± 0.0403 vs. 0.7783 ± 0.0659) or
+the 2-class task (0.6059 ± 0.1027 vs. 0.9391 ± 0.0349) — the honest
+result is a second, independent, and more rigorously-measured
+confirmation that this data's real signal, at the tile scale and
+compute budget tested here, is overwhelmingly positional and not
+something a deep vision model recovers from pixels beyond what a
+simple location-aware baseline already captures.
+
 ## Limitations and honest scope statement
 
 - **This is a negative result for the compositional-signal question as
