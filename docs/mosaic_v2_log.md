@@ -302,6 +302,100 @@ dimensional location/albedo signal already identified in Stage 0 — i.e.
 unprocessed generic visual features are not a shortcut to a better
 model here, at least not through a plain random forest on top of them.
 
+### Stage 2 baseline (head-only CV reference, plain tiles) — ResNet-50
+
+The reference point every Stage 2(a) albedo-normalization comparison
+is measured against: same head-only, 2-epoch, 5-fold-CV budget, plain
+(non-normalized) tiles.
+
+| fold | n_test | majority rate | accuracy | balanced accuracy | macro-F1 | ECE |
+|---|---|---|---|---|---|---|
+| 0 | 292 | 0.4863 | 0.3973 | 0.3478 | 0.2760 | 0.2104 |
+| 1 | 307 | 0.6124 | 0.7068 | 0.4629 | 0.4528 | 0.1428 |
+| 2 | 304 | 0.4605 | 0.6316 | 0.4676 | 0.4376 | 0.0440 |
+| 3 | 295 | 0.5356 | 0.6000 | 0.5038 | 0.4943 | 0.0353 |
+| 4 | 296 | 0.4797 | 0.5878 | 0.4829 | 0.4272 | 0.0840 |
+| **mean ± std** | | | 0.5847 ± 0.1025 | **0.4530 ± 0.0545** | 0.4176 ± 0.0744 | 0.1033 ± 0.0656 |
+
+Real result, consistent with `final/mosaic-dataset`'s own Stage 4/5
+findings: a head-only ResNet-50 is **well below** the CV trivial
+baseline (0.4530 vs. 0.7783, a −0.3253 point gap) — a plain CNN probe,
+even under this task's harder real CV bar, does not come close to what
+albedo+lat/lon alone already captures.
+
+### Stage 2 baseline (head-only CV reference, plain tiles) — ViT-B
+
+| fold | n_test | majority rate | accuracy | balanced accuracy | macro-F1 | ECE |
+|---|---|---|---|---|---|---|
+| 0 | 292 | 0.4863 | 0.3630 | 0.3656 | 0.3504 | 0.1698 |
+| 1 | 307 | 0.6124 | 0.6971 | 0.5194 | 0.5204 | 0.0244 |
+| 2 | 304 | 0.4605 | 0.6053 | 0.4478 | 0.4306 | 0.0516 |
+| 3 | 295 | 0.5356 | 0.5763 | 0.4810 | 0.4629 | 0.0487 |
+| 4 | 296 | 0.4797 | 0.5507 | 0.4757 | 0.4414 | 0.1611 |
+| **mean ± std** | | | 0.5585 ± 0.1095 | **0.4579 ± 0.0515** | 0.4411 ± 0.0550 | 0.0911 ± 0.0615 |
+
+Real result: essentially the same story as ResNet-50's baseline
+(0.4579 vs. 0.7783 trivial baseline, −0.3204 points) — slightly less
+bad than ResNet-50's head-only probe (−0.3253), but both arms are
+roughly 30 points below the real CV trivial baseline, and neither
+shows the severe `band1_mid`-ignoring mode-collapse `final/mosaic-dataset`'s
+ViT-B arm showed under its own, different (single-split) protocol —
+both confusion matrices here do populate the middle class to some real
+degree in most folds.
+
+### Stage 2(a): per-tile albedo normalization — ResNet-50
+
+Real per-tile histogram equalization (removes each tile's own overall
+brightness level/contrast before the model ever sees it), same
+head-only, 2-epoch, 5-fold-CV budget as the baseline above, compared
+directly against it (same architecture, same real tiles, only the
+pixel preprocessing differs):
+
+| fold | n_test | accuracy | balanced accuracy | macro-F1 | ECE |
+|---|---|---|---|---|---|
+| 0 | 292 | 0.4247 | 0.3739 | 0.2928 | 0.1499 |
+| 1 | 307 | 0.7231 | 0.5092 | 0.5262 | 0.1558 |
+| 2 | 304 | 0.6513 | 0.4812 | 0.4545 | 0.0770 |
+| 3 | 295 | 0.6407 | 0.5115 | 0.4689 | 0.0902 |
+| 4 | 296 | 0.5676 | 0.4729 | 0.4112 | 0.1064 |
+| **mean ± std** | | 0.6015 ± 0.1012 | **0.4698 ± 0.0502** | 0.4307 ± 0.0782 | 0.1159 ± 0.0317 |
+
+**Real result: a marginal, noise-level change** — 0.4698 vs. the plain
+baseline's 0.4530 (+0.0168 points, well under either arm's own ~0.05
+std) — still ≈0.31 points below the CV trivial baseline (−0.3085 vs.
+baseline's −0.3253). Removing raw brightness from the tiles neither
+helps nor meaningfully hurts a head-only ResNet-50 here, consistent
+with Stage 0's finding that the real signal this task's labels carry is
+overwhelmingly positional, not a brightness cue the model could have
+been leaning on in the first place — there is little brightness-driven
+performance left to remove.
+
+### Stage 2(a): per-tile albedo normalization — ViT-B
+
+| fold | n_test | accuracy | balanced accuracy | macro-F1 | ECE |
+|---|---|---|---|---|---|
+| 0 | 292 | 0.4349 | 0.3938 | 0.3938 | 0.1265 |
+| 1 | 307 | 0.6580 | 0.4677 | 0.4602 | 0.0493 |
+| 2 | 304 | 0.5987 | 0.4609 | 0.4530 | 0.0689 |
+| 3 | 295 | 0.5831 | 0.4769 | 0.4703 | 0.0780 |
+| 4 | 296 | 0.5439 | 0.4507 | 0.3978 | 0.1663 |
+| **mean ± std** | | 0.5637 ± 0.0741 | **0.4500 ± 0.0294** | 0.4350 ± 0.0325 | 0.0978 ± 0.0427 |
+
+**Real result: again essentially flat** vs. ViT-B's plain baseline
+(0.4500 vs. 0.4579, a −0.0079 point difference, noise-level) — −0.3283
+vs. the CV trivial baseline. Same conclusion as the ResNet-50 arm:
+albedo normalization does not meaningfully change what either
+architecture learns here, consistent with the real signal being
+positional rather than brightness-driven in the first place.
+
+**Stage 2(a) summary verdict**: per-tile albedo normalization does
+**not** beat the plain-tile baseline for either architecture — both
+differences are within a single fold's own standard deviation, i.e.
+indistinguishable from noise at this CV budget. Brightness was not a
+shortcut either architecture was meaningfully exploiting to begin with
+(Stage 0's own evidence: albedo alone only reaches 0.3690 balanced
+accuracy, far below location's 0.7215), so removing it changes little.
+
 ## Stage 4 (optional task variant, run early for convenience): 2-class trivial baseline
 
 Reported separately from every 3-class number in this log, per this
