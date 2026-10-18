@@ -71,7 +71,24 @@ tuned per fold, edges out models that also have to weigh a comparatively
 weak albedo feature. **Best tabular (spatial-prior) model: k-NN,
 0.7971 ± 0.0600 balanced accuracy.**
 
-### Stacking: out-of-fold CNN probabilities added to the best tabular model (k-NN)
+### Stacking: out-of-fold CNN probabilities added to the best stacking-compatible tabular model
+
+**Correction, caught by a smoke test before this was relied on**: an
+earlier version of this section said stacking used k-NN (the overall-
+best tabular candidate). That was wrong — the driver script's stacking
+step only naturally extends to feature-vector models (random forest /
+gradient boosting), since k-NN and the kernel smoother are defined
+directly on real great-circle distance over `(lat, lon)` with no
+natural way to fold in extra probability-vector dimensions. The code's
+`if/else` branch actually always fell through to gradient boosting
+whenever the overall-best candidate wasn't literally `"random_forest"`
+— which is what ran, but the printed label claimed it stacked onto
+k-NN, which it did not. Fixed: the script now explicitly selects the
+best of `{random_forest, gradient_boosting}` for stacking
+(**gradient boosting, 0.7814 ± 0.0488**, which also happens to be the
+real best of those two here) and labels it correctly. The numbers below
+were already computed using gradient boosting, so they are unchanged —
+only the earlier mislabeling is corrected here.
 
 Real residual ResNet-50 + class-weighted CNN (the exact real recipe
 `final/mosaic-v2`'s Stage 3 found to win), trained on each fold's TRAIN
@@ -79,10 +96,10 @@ rows only — its probabilities on VAL and TEST rows are genuinely
 out-of-fold relative to that CNN's own training, and no outer-test-fold
 information ever reaches any model's fit. Because only VAL has honest
 out-of-fold CNN probabilities, both the stacked model and a size-
-matched tabular-only baseline are fit on VAL rows only (disclosed
-explicitly — this is a smaller, matched training set for both arms, so
-the comparison isolates the real effect of adding CNN features, not
-just a smaller training set):
+matched tabular-only baseline (both gradient boosting) are fit on VAL
+rows only (disclosed explicitly — this is a smaller, matched training
+set for both arms, so the comparison isolates the real effect of adding
+CNN features, not just a smaller training set):
 
 | fold | n_test | tabular-only (val-only training) | stacked (val-only + CNN probs) |
 |---|---|---|---|

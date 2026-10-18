@@ -197,15 +197,35 @@ def main() -> int:
 
     best_name = max(candidates, key=lambda n: np.mean([s[0] for s in candidates[n]]))
     best_bal = np.array([s[0] for s in candidates[best_name]])
-    print(f"\nBest tabular (spatial-prior) model: {best_name} "
+    print(f"\nBest tabular (spatial-prior) model overall: {best_name} "
           f"({best_bal.mean():.4f} +/- {best_bal.std():.4f} balanced accuracy)")
+
+    # Stacking (adding arbitrary extra feature columns) only naturally
+    # applies to the two feature-vector candidates (random forest,
+    # gradient boosting) -- k-NN and the kernel smoother are defined
+    # directly on real great-circle distance over (lat, lon) only, with
+    # no natural way to fold in extra probability-vector dimensions
+    # without redefining their distance metric (a real design question
+    # of its own, not attempted here). So stacking uses whichever of
+    # {random_forest, gradient_boosting} is best, stated explicitly
+    # rather than silently substituted when the overall-best model
+    # (k-NN, here) isn't one of the two.
+    stackable_names = ["random_forest", "gradient_boosting"]
+    best_stackable_name = max(stackable_names, key=lambda n: np.mean([s[0] for s in candidates[n]]))
+    best_stackable_bal = np.array([s[0] for s in candidates[best_stackable_name]])
+    print(f"Best tabular model among stacking-compatible candidates (random forest / gradient "
+          f"boosting only, since k-NN/kernel-smoother don't naturally accept extra feature "
+          f"columns): {best_stackable_name} ({best_stackable_bal.mean():.4f} +/- "
+          f"{best_stackable_bal.std():.4f} balanced accuracy)")
 
     print(f"\nReference numbers: location-only RF={LOCATION_ONLY_RF_BAL_ACC:.4f} +/- {LOCATION_ONLY_RF_STD:.4f}, "
           f"albedo+lat/lon RF={ALBEDO_LATLON_RF_BAL_ACC:.4f} +/- {ALBEDO_LATLON_RF_STD:.4f}, "
           f"best deep model (residual ResNet-50 + class-weighted)={BEST_DEEP_MODEL_BAL_ACC:.4f} +/- {BEST_DEEP_MODEL_STD:.4f}")
 
-    # --- Stacking: out-of-fold CNN probabilities added to the best tabular model ---
-    print(f"\n=== Stacking real out-of-fold CNN probabilities onto '{best_name}' ===")
+    # --- Stacking: out-of-fold CNN probabilities added to the best stacking-compatible tabular model ---
+    print(f"\n=== Stacking real out-of-fold CNN probabilities onto '{best_stackable_name}' "
+          f"(best of the stacking-compatible candidates -- NOT necessarily the overall-best "
+          f"tabular model '{best_name}', see note above) ===")
     for fold in folds:
         tr_idx, va_idx, te_idx = list(fold.train_idx), list(fold.val_idx), list(fold.test_idx)
         train_rows_cnn = [rows[i] for i in tr_idx]
@@ -224,7 +244,7 @@ def main() -> int:
         X_val_stacked = np.column_stack([X_val_tabular, val_probs])
         X_test_stacked = np.column_stack([X_test_tabular, test_probs])
 
-        if best_name == "random_forest":
+        if best_stackable_name == "random_forest":
             tabular_matched = fit_random_forest(X_val_tabular, y_all[va_idx], seed=SEED)
             stacked = fit_random_forest(X_val_stacked, y_all[va_idx], seed=SEED)
         else:
