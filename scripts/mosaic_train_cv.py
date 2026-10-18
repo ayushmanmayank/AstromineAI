@@ -83,6 +83,12 @@ CV_TRIVIAL_BASELINE_BAL_ACC = 0.7783  # Stage 0, random forest, mean across 5 fo
 CV_TRIVIAL_BASELINE_BAL_ACC_STD = 0.0659
 CV_TRIVIAL_BASELINE_MACRO_F1 = 0.7815
 
+# Stage 4's separate, real 2-class trivial baseline (scripts/mosaic_cv_2class_trivial_baseline.py):
+# real, label-reused 2-class task (band1_mid dropped), NOT the 3-class
+# numbers above -- selected at runtime in main() based on --task.
+CV_TRIVIAL_BASELINE_BAL_ACC_2CLASS = 0.9391
+CV_TRIVIAL_BASELINE_BAL_ACC_STD_2CLASS = 0.0349
+
 
 class RandomAugment:
     """Same real, simple augmentation as final/mosaic-dataset's
@@ -405,13 +411,19 @@ def main(argv=None) -> int:
               f"cm={metrics['confusion_matrix']}")
 
     bal_accs, f1s, accs, eces = map(np.array, (bal_accs, f1s, accs, eces))
+    if args.task == "2class":
+        trivial_bal_acc, trivial_std = CV_TRIVIAL_BASELINE_BAL_ACC_2CLASS, CV_TRIVIAL_BASELINE_BAL_ACC_STD_2CLASS
+        trivial_label = "random forest, 2-class task"
+    else:
+        trivial_bal_acc, trivial_std = CV_TRIVIAL_BASELINE_BAL_ACC, CV_TRIVIAL_BASELINE_BAL_ACC_STD
+        trivial_label = "random forest, 3-class task"
     print(f"\n[{args.tag}] === CV SUMMARY (mean +/- std across {len(folds)} outer test folds) ===")
     print(f"[{args.tag}] accuracy={accs.mean():.4f} +/- {accs.std():.4f}  "
           f"balanced_accuracy={bal_accs.mean():.4f} +/- {bal_accs.std():.4f}  "
           f"macro_f1={f1s.mean():.4f} +/- {f1s.std():.4f}  ece={eces.mean():.4f} +/- {eces.std():.4f}")
-    print(f"[{args.tag}] vs CV trivial baseline (random forest): balanced_accuracy="
-          f"{CV_TRIVIAL_BASELINE_BAL_ACC:.4f} +/- {CV_TRIVIAL_BASELINE_BAL_ACC_STD:.4f}  "
-          f"diff={bal_accs.mean() - CV_TRIVIAL_BASELINE_BAL_ACC:+.4f}")
+    print(f"[{args.tag}] vs CV trivial baseline ({trivial_label}): balanced_accuracy="
+          f"{trivial_bal_acc:.4f} +/- {trivial_std:.4f}  "
+          f"diff={bal_accs.mean() - trivial_bal_acc:+.4f}")
 
     return 0
 
