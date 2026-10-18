@@ -254,3 +254,79 @@ least for the real ~88%-coverage subset tested, under the real
 compute/data limits of this check. Stage 2 and 3 proceed on the
 existing single-band (clear-filter) FC tiles only, per this gate's
 instruction.
+
+## Stage 2: removing the brightness shortcut
+
+Real, stated compute-budget decision for all of Stage 2 and 3: 5-fold
+CV multiplies training cost 5x over `final/mosaic-dataset`'s
+single-split runs, so every CNN/ViT run in this stage is a **head-only
+probe** (frozen ImageNet-pretrained backbone, 2 epochs, no unfreeze
+stage) — a disclosed trade-off, not a silent shortcut. This still
+answers the real question ("does the model see anything in the pixels
+beyond albedo+lat/lon") since a frozen-backbone head on real ImageNet
+features is a meaningful probe of what visual information is already
+present, and it is directly comparable across every variant/ablation
+reported here (same budget throughout). `final/mosaic-dataset`'s Stage
+4 full staged fine-tune (`resnet50_classweighted.pt`, 2+2 epochs,
+single split) remains the separate reference for what full fine-tuning
+can do on that fixed test set.
+
+### Stage 2(c): hybrid — frozen ImageNet ResNet-50 embeddings + albedo + lat/lon (random forest)
+
+Deliberately uses an off-the-shelf, never-Vesta-fine-tuned ResNet-50
+backbone (not `final/mosaic-dataset`'s `resnet50_classweighted.pt`
+checkpoint, which was fit on a *different* train/val/test split that
+overlaps with this task's new CV test folds — reusing it here would
+leak real label information into a supposedly "frozen" extractor). A
+real, stated trade-off: zero leakage risk, but no Vesta-adapted feature
+space either.
+
+| fold | n_test | accuracy | balanced accuracy | macro-F1 |
+|---|---|---|---|---|
+| 0 | 292 | 0.5925 | 0.5028 | 0.4523 |
+| 1 | 307 | 0.8502 | 0.6055 | 0.6077 |
+| 2 | 304 | 0.7500 | 0.5613 | 0.5499 |
+| 3 | 295 | 0.7864 | 0.6267 | 0.5851 |
+| 4 | 296 | 0.6182 | 0.5187 | 0.4720 |
+| **mean ± std** | | 0.7195 ± 0.0989 | **0.5630 ± 0.0479** | 0.5334 ± 0.0613 |
+
+**Real, honest negative result**: raw, off-the-shelf ImageNet visual
+features *combined with* albedo+lat/lon score **worse** than
+albedo+lat/lon alone (0.5630 vs. 0.7783 trivial baseline, a −0.2153
+point difference — not a rounding-level gap). Plausible real cause,
+stated as a hypothesis, not proven here: 2048-dimensional raw ImageNet
+features, added on top of the 4 side features, give the random forest
+far more irrelevant dimensions to fit with only ~900-1000 real training
+tiles per fold, diluting rather than adding to the strong, low-
+dimensional location/albedo signal already identified in Stage 0 — i.e.
+unprocessed generic visual features are not a shortcut to a better
+model here, at least not through a plain random forest on top of them.
+
+## Stage 4 (optional task variant, run early for convenience): 2-class trivial baseline
+
+Reported separately from every 3-class number in this log, per this
+stage's own rule. Reuses `final/mosaic-dataset`'s already-fixed,
+already-committed Band I center tertile thresholds unchanged (no new
+threshold computed) — `ml/data/mosaic_labels_v2.py` simply drops the
+middle tertile (`band1_mid`) and keeps the two extremes
+(`band1_low`/`band1_high`), committed before any training on it, per
+this task's rule. 1,299 of 1,494 real tiles remain (195 `band1_mid`
+tiles dropped).
+
+| fold | n_test | majority rate | balanced accuracy | macro-F1 |
+|---|---|---|---|---|
+| 0 | 263 | 0.5513 | 0.8807 | 0.8744 |
+| 1 | 256 | 0.5039 | 0.9179 | 0.9179 |
+| 2 | 262 | 0.5076 | 0.9730 | 0.9733 |
+| 3 | 258 | 0.5155 | 0.9570 | 0.9573 |
+| 4 | 260 | 0.7231 | 0.9669 | 0.9709 |
+| **mean ± std** | | | **0.9391 ± 0.0349** | 0.9388 ± 0.0378 |
+
+Real, expected finding: the 2-class task (the two most extreme tertile
+bins only) is dramatically easier than the 3-class task even for the
+trivial baseline (0.9391 vs. the 3-class trivial baseline's 0.7783) —
+unsurprising, since dropping the ambiguous middle bin removes most of
+the real classes' overlap in albedo/location space. This raises the
+bar for any 2-class deep-model comparison correspondingly higher; see
+the Stage 4 section below for the deep-model result against this real
+number.

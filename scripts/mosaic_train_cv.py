@@ -55,7 +55,20 @@ from torch.utils.data import DataLoader, WeightedRandomSampler
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from ml.data.mosaic_dataset_cv import MosaicTileDatasetCV  # noqa: E402
-from ml.data.mosaic_labels import CLASS_NAMES  # noqa: E402
+from ml.data.mosaic_labels import CLASS_NAMES as _TERTILE_CLASS_NAMES  # noqa: E402
+from ml.data.mosaic_labels_v2 import CLASS_NAMES as _TWO_CLASS_NAMES, remap_tertile_to_2class  # noqa: E402
+
+# Mutable (list-wrapped so in-place reassignment in main() is visible to
+# every function below that already captured a reference): Stage 4's
+# optional 2-class task variant (--task 2class) swaps this from the
+# default 3-class tertile scheme, per that stage's own rule that the
+# 2-class task is reported separately, never mixed into the 3-class
+# numbers.
+ACTIVE_CLASS_NAMES = [_TERTILE_CLASS_NAMES]
+
+
+def _n_classes() -> int:
+    return len(ACTIVE_CLASS_NAMES[0])
 from ml.models import cnn_resnet, vit_model  # noqa: E402
 from ml.utils.mosaic_cv import N_FOLDS, make_cv_folds  # noqa: E402
 
@@ -146,30 +159,30 @@ def load_all_kept_tiles(manifest_csv: str) -> list[dict]:
 
 
 def build_class_weights(rows: list[dict], device) -> torch.Tensor:
-    counts = np.zeros(len(CLASS_NAMES))
+    counts = np.zeros(_n_classes())
     for r in rows:
         counts[int(r["label"])] += 1
     counts = np.maximum(counts, 1)
-    weights = counts.sum() / (len(CLASS_NAMES) * counts)
+    weights = counts.sum() / (_n_classes() * counts)
     return torch.tensor(weights, dtype=torch.float32, device=device)
 
 
 def make_model(args, device):
     side_inputs = args.variant == "residual"
     if side_inputs:
-        model = ResNetWithSideInputs(num_classes=len(CLASS_NAMES), pretrained=True).to(device)
+        model = ResNetWithSideInputs(num_classes=_n_classes(), pretrained=True).to(device)
         for p in model.features.parameters():
             p.requires_grad = False
         trainable = list(model.classifier.parameters())
     elif args.model == "vit_b":
-        model = vit_model.build_model(num_classes=len(CLASS_NAMES), pretrained=True).to(device)
+        model = vit_model.build_model(num_classes=_n_classes(), pretrained=True).to(device)
         for p in model.parameters():
             p.requires_grad = False
         for p in model.head.parameters():
             p.requires_grad = True
         trainable = list(model.head.parameters())
     else:
-        model = cnn_resnet.build_model(num_classes=len(CLASS_NAMES), pretrained=True).to(device)
+        model = cnn_resnet.build_model(num_classes=_n_classes(), pretrained=True).to(device)
         for p in model.parameters():
             p.requires_grad = False
         for p in model.fc.parameters():
@@ -191,7 +204,7 @@ def run_fold(args, train_rows, val_rows, test_rows, device, seed):
 
     sampler = None
     if args.balanced_sampling:
-        counts = np.zeros(len(CLASS_NAMES))
+        counts = np.zeros(_n_classes())
         for r in train_rows:
             counts[int(r["label"])] += 1
         counts = np.maximum(counts, 1)
@@ -282,7 +295,7 @@ def run_fold(args, train_rows, val_rows, test_rows, device, seed):
             "balanced_accuracy": float(balanced_accuracy_score(labels_arr, preds)),
             "macro_f1": float(f1_score(labels_arr, preds, average="macro", zero_division=0)),
             "ece": expected_calibration_error(conf, correct),
-            "confusion_matrix": confusion_matrix(labels_arr, preds, labels=list(range(len(CLASS_NAMES)))).tolist(),
+            "confusion_matrix": confusion_matrix(labels_arr, preds, labels=list(range(_n_classes()))).tolist(),
         }
 
     test_metrics = evaluate(test_loader)
@@ -320,6 +333,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--variant", choices=["baseline", "albedo_norm", "residual"], default="baseline")
     parser.add_argument("--model", choices=["resnet50", "vit_b"], default="resnet50")
+    parser.add_argument("--task", choices=["3class", "2class"], default="3class",
+                         help="Stage 4's optional 2-class variant (drops band1_mid, reuses the "
+                              "already-committed tertile thresholds via ml/data/mosaic_labels_v2.py). "
+                              "Reported separately, never mixed with 3-class numbers.")
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--vit-lr", type=float, default=0.0, help="If >0, use this LR instead of --lr for ViT-B (ablation).")
@@ -342,6 +359,21 @@ def main(argv=None) -> int:
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(levelname)-7s %(name)s: %(message)s")
 
     rows = load_all_kept_tiles(args.manifest)
+
+    if args.task == "2class":
+        ACTIVE_CLASS_NAMES[0] = _TWO_CLASS_NAMES
+        remapped_rows = []
+        for r in rows:
+            new_label = remap_tertile_to_2class(int(r["label"]))
+            if new_label == -1:
+                continue  # band1_mid dropped, per this task variant's own rule
+            r = dict(r)
+            r["label"] = str(new_label)
+            remapped_rows.append(r)
+        print(f"Stage 4 2-class task: {len(remapped_rows)} of {len(rows)} real tiles kept "
+              f"(band1_mid dropped); classes={ACTIVE_CLASS_NAMES[0]}")
+        rows = remapped_rows
+
     lats = [float(r["center_lat"]) for r in rows]
     lons = [float(r["center_lon"]) for r in rows]
     folds = make_cv_folds(lats, lons, BLOCK_SIZE_DEG, TILE_SIZE_DEG, n_folds=args.n_folds, seed=args.seed)

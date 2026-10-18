@@ -50,6 +50,59 @@ label set** (`docs/engineering_status.md`), so the system is mechanically
 ready to be pointed at real labels the moment a future effort produces
 them by a method not subject to the confounds found here.
 
+## Update: global-mosaic image-classification experiment (`final/mosaic-dataset` → `final/mosaic-v2`)
+
+A later, separate experiment branched off this closeout — does not
+revise anything above (month1's spectral-crop pipeline and its negative
+verdict, and the Month 2 engineering system, are unchanged). It asks a
+narrower question: can a deep image model, trained on real Framing
+Camera (FC) global-mosaic tiles, learn to predict coarse VIR Band I
+center bins (tertiles of the real VIR global mosaic's own distribution
+— **not a validated mineral-composition classification**, see
+`ml/data/mosaic_labels.py`) better than a trivial brightness/location
+baseline, under a leakage-safe (region-block) split?
+
+**Accuracy, on the real, fixed 222-tile test set (`final/mosaic-dataset`,
+touched exactly once)**:
+
+| model | balanced accuracy | macro-F1 |
+|---|---|---|
+| Trivial baseline (albedo + lat/lon, random forest) | 0.5530 | 0.5374 |
+| ResNet-50 (class-weighted) | 0.5067 | 0.4744 |
+| ViT-B | 0.4831 | 0.4636 |
+| Ensemble | 0.5056 | 0.5072 |
+
+No deep model beat the trivial baseline on that single test set.
+
+**The new finding (`final/mosaic-v2`)**: re-measuring the trivial
+baseline properly, under **5-fold region-block cross-validation**
+instead of one fixed split, it scores **0.7783 ± 0.0659 balanced
+accuracy** — far higher than the single-split number above, and not a
+bug (verified directly: zero region-block overlap between every fold's
+train/val/test). Isolating *why*, under the identical CV folds: albedo
+alone reaches only 0.3690 and latitude alone only 0.4868, but
+**latitude + longitude together — zero pixel data, zero brightness —
+already reach 0.7215**. Most of the real signal in this task is
+positional, not visual: the 20°-block grid used for leakage-safe
+splitting is large enough that a tile's (lat, lon) address is itself
+close to knowing which real Vesta geologic terrane produced its label.
+This raises the real bar for any vision model considerably, and
+reframes the question from "can a CNN beat 55%" to "does a CNN see
+anything beyond what location already tells us."
+
+Two further checks against that harder, real bar, both honest
+negatives: **(1)** real FC color-filter mosaics (749/917/965 nm,
+downloaded and empirically longitude-verified from
+`sbnarchive.psi.edu`) add no extra signal beyond albedo+lat/lon
+(−0.0258 points, within noise); **(2)** off-the-shelf frozen ImageNet
+ResNet-50 embeddings, combined with albedo+lat/lon, score *worse* than
+albedo+lat/lon alone (0.5630 vs. 0.7783). Full numbers and the
+in-progress confound-removal experiments (per-tile albedo
+normalization, residual side-input models) are in
+[`docs/mosaic_v2_log.md`](docs/mosaic_v2_log.md); the original
+experiment's full writeup is in
+[`docs/mosaic_experiment_log.md`](docs/mosaic_experiment_log.md).
+
 ## Layout
 
 - `ml/data/` — PDS3 acquisition (`pds_acquisition.py`), spatial alignment
