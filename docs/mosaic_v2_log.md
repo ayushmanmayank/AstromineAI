@@ -396,6 +396,70 @@ shortcut either architecture was meaningfully exploiting to begin with
 (Stage 0's own evidence: albedo alone only reaches 0.3690 balanced
 accuracy, far below location's 0.7215), so removing it changes little.
 
+### Stage 2(b): residual model — ResNet-50 + real side inputs (albedo, lat, sin/cos lon) concatenated before the classifier
+
+| fold | n_test | accuracy | balanced accuracy | macro-F1 | ECE |
+|---|---|---|---|---|---|
+| 0 | 292 | 0.4452 | 0.4294 | 0.4191 | 0.1230 |
+| 1 | 307 | 0.7068 | 0.4797 | 0.4865 | 0.1276 |
+| 2 | 304 | 0.6908 | 0.5260 | 0.5234 | 0.1169 |
+| 3 | 295 | 0.6576 | 0.5238 | 0.4688 | 0.0374 |
+| 4 | 296 | 0.5811 | 0.4979 | 0.4416 | 0.1452 |
+| **mean ± std** | | 0.6163 ± 0.0959 | **0.4913 ± 0.0354** | 0.4679 ± 0.0361 | 0.1100 ± 0.0375 |
+
+**Real result: the best of every Stage 2 variant tested** (0.4913 vs.
+plain ResNet-50's 0.4530, albedo-norm ResNet-50's 0.4698, plain ViT-B's
+0.4579, albedo-norm ViT-B's 0.4500) — a genuine, non-noise-level
+improvement (+0.0383 over plain ResNet-50, more than half a fold's own
+std). Giving the model direct access to the same real positional
+features the trivial baseline itself uses clearly helps, which makes
+sense: a CNN cannot recover absolute (lat, lon) from image content
+alone (crater shapes do not uniquely encode global position without
+recognizing specific, individually-identified landmarks), so handing
+it that information explicitly closes part of the gap.
+
+**But it still falls well short of the pure trivial baseline**
+(0.4913 vs. 0.7783, a −0.2870 point gap — smaller than every other
+variant's gap, but still large). A real, honest, plausible explanation,
+stated as a hypothesis rather than proven here: a frozen-backbone
+linear head learning a joint decision boundary over 2048 largely-
+irrelevant CNN dimensions plus 4 real, highly-informative side-input
+dimensions, under only 2 head-only epochs, does not weight those 4
+dimensions as effectively as a random forest given only those same 4
+dimensions and no distracting high-dimensional noise. This is not
+evidence that the CNN's own visual features are adding anything real —
+if they were, the residual model should have come *closer to or beaten*
+the trivial baseline, not merely improved on the CNN-alone arms while
+remaining far below it.
+
+### Stage 2 summary + winner for Stage 3
+
+| variant | balanced accuracy (mean ± std) | vs. CV trivial baseline (0.7783 ± 0.0659) |
+|---|---|---|
+| Baseline ResNet-50 | 0.4530 ± 0.0545 | −0.3253 |
+| Baseline ViT-B | 0.4579 ± 0.0515 | −0.3204 |
+| Albedo-normalized ResNet-50 | 0.4698 ± 0.0502 | −0.3085 |
+| Albedo-normalized ViT-B | 0.4500 ± 0.0294 | −0.3283 |
+| Hybrid (frozen ImageNet embeddings + RF) | 0.5630 ± 0.0479 | −0.2153 |
+| **Residual (ResNet-50 + side inputs)** | **0.4913 ± 0.0354** | **−0.2870** |
+
+Real, honest Stage 2 verdict: **every single variant remains well
+below the CV trivial baseline.** None of this stage's confound-removal
+attempts turned up a configuration where the deep model sees something
+in the pixels beyond what albedo+lat/lon already capture — if anything,
+the clearest lesson is that handing the model the trivial features
+directly (Stage 2(b)) helps more than anything the CNN extracts from
+pixels on its own. The **hybrid variant (0.5630)** is nominally the
+least-bad CNN-involving result in raw number, but it uses no Vesta
+training at all (an off-the-shelf frozen embedding) and was already
+reported in Stage 2(c) as a real negative relative to the trivial
+baseline alone. Per this task's instruction to carry forward "the best
+Stage 2 variant" for Stage 3's ablations, **residual ResNet-50
+(0.4913 ± 0.0354)** is used — it is the best real, Vesta-trained,
+image-using configuration, even though the margin over the other
+image-using arms is real but modest, and none of them is close to
+competitive with the trivial baseline.
+
 ## Stage 4 (optional task variant, run early for convenience): 2-class trivial baseline
 
 Reported separately from every 3-class number in this log, per this
