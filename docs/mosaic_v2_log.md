@@ -495,6 +495,45 @@ different (CV, not single-split) protocol and a different base
 architecture (residual, not plain ResNet-50) — a real, robust finding,
 not a one-off.
 
+### Ablation 2 — augmentation (flip/rotate/brightness jitter)
+
+| fold | n_test | accuracy | balanced accuracy | macro-F1 | ECE |
+|---|---|---|---|---|---|
+| 0 | 292 | 0.4281 | 0.4452 | 0.4206 | 0.1351 |
+| 1 | 307 | 0.6384 | 0.3958 | 0.3876 | 0.1215 |
+| 2 | 304 | 0.6875 | 0.5323 | 0.5298 | 0.1093 |
+| 3 | 295 | 0.6678 | 0.5350 | 0.4766 | 0.0799 |
+| 4 | 296 | 0.5676 | 0.4840 | 0.4194 | 0.1295 |
+| **mean ± std** | | 0.5979 ± 0.0941 | **0.4785 ± 0.0530** | 0.4468 ± 0.0504 | 0.1151 ± 0.0196 |
+
+**Real, honest negative result**: augmentation makes things *worse*
+than the plain residual baseline (0.4785 vs. 0.4913, a −0.0128 point
+drop) and far worse than class-weighting (0.5637) — −0.2998 vs. the CV
+trivial baseline, the largest gap of any Stage 3 result. A plausible
+real explanation, not proven here: with only 2 head-only epochs, the
+extra variance augmentation introduces (random flip/rotation/brightness
+jitter) leaves too little real training signal for the model to
+converge on, and this dataset's real signal is overwhelmingly
+positional (Stage 0), not a visual pattern augmentation could help
+generalize.
+
+### Stage 3 verdict
+
+**Class-weighted loss is a real, clean win; augmentation is a real,
+clean loss.** Per this task's rule ("do not stack more than what wins
+individually"), only class-weighting carries forward:
+
+| config | balanced accuracy (mean ± std) | vs. CV trivial baseline |
+|---|---|---|
+| Residual ResNet-50 (Stage 2 winner) | 0.4913 ± 0.0354 | −0.2870 |
+| + class-weighted loss | **0.5637 ± 0.0403** | **−0.2146** |
+| + augmentation (instead) | 0.4785 ± 0.0530 | −0.2998 |
+
+**Final best real configuration for this branch: residual ResNet-50 +
+class-weighted loss, 0.5637 ± 0.0403 balanced accuracy** — still well
+below the CV trivial baseline (0.7783 ± 0.0659), but the best any
+image-using model achieved under this task's real compute budget.
+
 ## Stage 4 (optional task variant, run early for convenience): 2-class trivial baseline
 
 Reported separately from every 3-class number in this log, per this
