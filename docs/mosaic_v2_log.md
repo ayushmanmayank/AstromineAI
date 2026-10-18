@@ -562,3 +562,26 @@ the real classes' overlap in albedo/location space. This raises the
 bar for any 2-class deep-model comparison correspondingly higher; see
 the Stage 4 section below for the deep-model result against this real
 number.
+
+### Stage 4: 2-class deep model (winning config — residual ResNet-50 + class-weighted loss)
+
+| fold | n_test | majority rate | accuracy | balanced accuracy | macro-F1 | ECE |
+|---|---|---|---|---|---|---|
+| 0 | 263 | 0.5513 | 0.4335 | 0.4326 | 0.4319 | 0.2631 |
+| 1 | 256 | 0.5039 | 0.5508 | 0.5539 | 0.4680 | 0.1364 |
+| 2 | 262 | 0.5076 | 0.7290 | 0.7255 | 0.7124 | 0.0951 |
+| 3 | 258 | 0.5155 | 0.6589 | 0.6665 | 0.6408 | 0.0864 |
+| 4 | 260 | 0.7231 | 0.7000 | 0.6512 | 0.6429 | 0.0545 |
+| **mean ± std** | | | 0.6144 ± 0.1088 | **0.6059 ± 0.1027** | 0.5792 ± 0.1092 | 0.1271 ± 0.0728 |
+
+**Real, honest finding**: the deep model's raw balanced accuracy is
+higher here (0.6059) than on the 3-class task (0.5637) — the 2-class
+task is simply easier — but the **gap to the trivial baseline is
+larger, not smaller** (−0.3332 vs. the 3-class task's −0.2146), because
+the trivial baseline improves even more on the easier task (0.7783 →
+0.9391, +0.1608) than the deep model does (0.5637 → 0.6059, +0.0422).
+Simplifying the task does not help the deep model catch up — if
+anything it falls further behind in relative terms. This is reported
+as a separate task's result, per this stage's own rule, and is not
+mixed with the 3-class numbers anywhere in this log or the final
+report.
