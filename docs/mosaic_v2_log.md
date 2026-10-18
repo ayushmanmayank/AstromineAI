@@ -123,3 +123,134 @@ location-only random forest (0.7215 ± 0.0961 / not separately computed
 for macro-F1 here, see raw output) are reported alongside for context.
 The majority-class rate (mean across folds, from the per-fold numbers
 above) is reported next to every result too, per this task's rule.
+
+## Stage 1: Gate C — is there extra signal in real FC color-filter data?
+
+### Real source
+
+Checked directly against the real archive (`sbnarchive.psi.edu/pds3/dawn/fc/`):
+the raw per-frame FC2 calibrated-image archives (`DWNxFC2_1A/1B.tgz`,
+9–98 GB each) are far too large and are not mosaics; the real, usable
+product is volume **`DWNVFC2_2`** (`DAWN-A-FC2-5-MOSAIC-V1.0`, "Dawn
+FC2 High Level (2/3) Vesta Encounter Mosaics") — confirmed via its own
+`AAREADME.TXT` (not a stub), `DATA/HAMO_COLOR/` holds real global
+cylindrical mosaics (`VE_HAMO_00N_330E_CYL_FILTx.IMG`) for filters 2–8,
+plus a ready-made Clementine-ratio composite (not used here; raw
+filters give the task's own named ratio recipe directly). Recorded with
+sha256/size in `datasets/mosaic/manifests/color_acquisition_manifest.json`:
+
+| file | size (bytes) | sha256 | real center wavelength |
+|---|---|---|---|
+| `VE_HAMO_00N_330E_CYL_FILT3.IMG` | 1,426,367,448 | `8bf5b0cd...a3e55c4` | 749 nm |
+| `VE_HAMO_00N_330E_CYL_FILT4.IMG` | 1,426,367,448 | `5dcc7588...09df974a` | 917 nm |
+| `VE_HAMO_00N_330E_CYL_FILT5.IMG` | 1,426,367,448 | `58e2cfa0...47cd7d92b` | 965 nm |
+
+**Real, caught-before-relying-on-it mistake**: an initial assumption,
+based on a remembered generic Dawn FC filter table (F5≈758nm,
+F7≈917nm, F8≈965nm), was used to start downloading F5/F7/F8 — a quick
+byte-range probe of every real file's own label (cheap, no full
+download needed) before relying on this gave the TRUE, label-confirmed
+table instead: **F2=555nm, F3=749nm, F4=917nm, F5=965nm, F6=829nm,
+F7=653nm, F8=438nm** — wavelength does not increase monotonically with
+filter number in this instrument's real numbering. This task's own
+"750/920 nm, 965/750 nm" ratio recipe therefore needs **F3, F4, F5**,
+not F5/F7/F8. The wrong F7/F8 download was caught and stopped (after F5
+had already finished, which turned out to still be needed) before
+wasting further bandwidth; F3 and F4 were then downloaded instead.
+
+### Reader + empirical format checks (`ml/data/mosaic_color_reader.py`, new file)
+
+Same real PDS3 self-labeled-mosaic schema as VIR's (`LINES`,
+`LINE_SAMPLES`, `SAMPLE_BITS=32`, `SAMPLE_TYPE=IEEE_REAL`,
+`MISSING_CONSTANT=-1.0E+32`, `MAP_RESOLUTION`, `SIMPLE_CYLINDRICAL`,
+same 255 km sphere), reused via import from
+`ml/data/mosaic_reader.py` (that file itself left untouched). The one
+real difference: this file's attached label (`RECORD_BYTES=106812`,
+`LABEL_RECORDS=2` → 213,624 bytes) is larger than VIR's fixed
+64,096-byte header, so a new reader discovers the real header size
+from a small probe read rather than assuming a fixed size.
+
+**Endianness re-confirmed empirically, not assumed to carry over from
+VIR** (DLR vs. a different VIR-processing institution): big-endian
+gives a clean, physically sane result (an 11.5%, clearly real nodata
+population matching `MISSING_CONSTANT`, and the remaining pixels'
+"sane-range" (|v|<100) values span 0.0–55.8 with mean 0.139 — a
+realistic photometric reflectance distribution for Vesta); little-endian
+gives nonsense (values near float32's ±3.4e38 range, NaN means from
+overflow). Big-endian confirmed correct.
+
+**Real, additional, undeclared-artifact finding**: beyond the labeled
+`MISSING_CONSTANT`, ~55,221 of 356,511,753 pixels (0.0155%) in the real
+F5 raster carry non-physical values (~1e29 scale) that are neither
+close to the declared sentinel nor caught by a generic `>1e30` cutoff —
+no other PDS3 null/saturation keyword (`CORE_NULL`,
+`CORE_*_SATURATION`, etc.) is declared in the label either, so these are
+real, undocumented artifacts, not a parsing bug. Handled with an
+explicit, documented plausible-reflectance clip (`[0.0, 5.0]`) in
+`scripts/mosaic_color_check.py`, kept separate from the generic reader
+(which stays faithful only to the label's own declared sentinel).
+
+### Real longitude-convention check (printed, same discipline as the original Rheasilvia check)
+
+Since this is a broadband albedo image rather than a derived spectral
+quantity, the check used here is structural cross-correlation against
+the already-trusted FC clear-filter mosaic (not VIR's spectral-depth
+argument) at 3 real, named features (Rheasilvia, Divalia Fossae,
+Marcia), searching ±25 px locally for the best alignment (correcting
+for the small 74.1765 vs. 74.1778 px/deg resolution mismatch between
+this color volume and the primary 74ppd FC GeoTIFF):
+
+| point | sign=+1 | sign=−1 |
+|---|---|---|
+| Rheasilvia | **+0.4031** | +0.2281 |
+| Divalia Fossae | **+0.6226** | +0.1380 |
+| Marcia | **+0.2419** | +0.2336 |
+
+`lon_sign=+1` wins clearly at 2 of 3 points and ties at the third —
+**the opposite sign from VIR's `-1`**, confirmed rather than assumed to
+carry over (the PDS3 SIS leaves this implementation-defined per-dataset,
+already documented in `ml/data/mosaic_reader.py`, and FC2's color
+mosaics are a different processing pipeline than VIR's). The real
+`-150°` Claudia-frame longitude offset DID carry over unchanged (beats
+offset=0 at all 3 points: Rheasilvia +0.4031 vs. +0.0466; Divalia Fossae
++0.6226 vs. +0.3176; Marcia +0.2419 vs. +0.2194). Side-by-side check
+images saved (not committed, gitignored like the original crater
+checks): `datasets/mosaic/checks/{Rheasilvia,Divalia_Fossae}_fc_vs_fc2color_confirmed.png`.
+
+### Real coverage + Gate C result (`scripts/mosaic_color_check.py`)
+
+Real per-band valid-pixel coverage (full mosaic): F3 88.48%, F4 88.39%,
+F5 88.45% — real and incomplete, as `AAREADME.TXT` documents (HAMO-1
+cycle 1/6 full color for the south, HAMO-2 cycle 6 only for the north,
+poor illumination at high latitudes; LAMO color excluded entirely from
+this volume for coverage reasons). Of the real 1,494 Stage-3 tiles,
+**1,393 have full F3+F4+F5 coverage** (101 missing at least one band).
+
+Real per-tile color-ratio features: `ratio1 = F3/F4` (~750/920 nm),
+`ratio2 = F5/F3` (~965/750 nm), each a real 11×11-pixel local-window
+mean (not a single pixel) around the tile's center, looked up via the
+confirmed `lon_sign=+1, lon_offset=-150°` conversion. Random forest,
+same 5-fold region-block CV (recomputed over the 1,393-tile coverage
+subset, so the comparison is apples-to-apples — the trivial baseline's
+CV number is slightly different here than Stage 0's full-1,494-tile
+number, both reported honestly):
+
+| features (1,393-tile coverage subset) | balanced accuracy (mean ± std) | macro-F1 (mean ± std) |
+|---|---|---|
+| albedo + lat/lon only | 0.7486 ± 0.0682 | 0.7461 ± 0.0688 |
+| albedo + lat/lon + color-ratios | 0.7228 ± 0.0715 | 0.7244 ± 0.0710 |
+
+Gain from adding color-ratio features: **−0.0258** balanced-accuracy
+points (color-ratios made it slightly *worse*), against 1 std of the
+albedo+lat/lon CV spread = 0.0682.
+
+**GATE C verdict: color-ratio features do NOT beat the albedo+lat/lon
+baseline by more than 1 std of the CV spread — no extra signal in
+available FC color data.** Stated plainly, not reasoned around:
+whatever real information F3/F4/F5 broadband reflectance ratios carry
+about these VIR Band I tertile labels is already redundant with (or
+weaker than) what clear-filter albedo + location already capture, at
+least for the real ~88%-coverage subset tested, under the real
+compute/data limits of this check. Stage 2 and 3 proceed on the
+existing single-band (clear-filter) FC tiles only, per this gate's
+instruction.

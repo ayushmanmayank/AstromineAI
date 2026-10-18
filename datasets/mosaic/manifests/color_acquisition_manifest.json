@@ -1,0 +1,28 @@
+{
+  "dataset": "DAWN-A-FC2-5-MOSAIC-V1.0",
+  "volume": "DWNVFC2_2",
+  "description": "Dawn FC2 High Level (2/3) Vesta Encounter Mosaics, real cylindrical color-filter global mosaics (F3/F4/F5), used for Stage 1 Gate C's color-ratio confound screen.",
+  "files": {
+    "F3": {
+      "filename": "VE_HAMO_00N_330E_CYL_FILT3.IMG",
+      "url": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_2/DATA/HAMO_COLOR/VE_HAMO_00N_330E_CYL_FILT3.IMG",
+      "size_bytes": 1426367448,
+      "sha256": "8bf5b0cdfe296f89dadf4707e9e9dd4752ae709e3c8c8803da9644f72a3e55c4",
+      "center_wavelength_nm": 749.0
+    },
+    "F4": {
+      "filename": "VE_HAMO_00N_330E_CYL_FILT4.IMG",
+      "url": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_2/DATA/HAMO_COLOR/VE_HAMO_00N_330E_CYL_FILT4.IMG",
+      "size_bytes": 1426367448,
+      "sha256": "5dcc758809e9a101ae8f486c98d61b95d21c8aa70b853837118503e909df974a",
+      "center_wavelength_nm": 917.0
+    },
+    "F5": {
+      "filename": "VE_HAMO_00N_330E_CYL_FILT5.IMG",
+      "url": "https://sbnarchive.psi.edu/pds3/dawn/fc/DWNVFC2_2/DATA/HAMO_COLOR/VE_HAMO_00N_330E_CYL_FILT5.IMG",
+      "size_bytes": 1426367448,
+      "sha256": "58e2cfa0b758a7a9c52e0fea34f5d5d91470e55d23a0d8d11a7b76447cd7d92b",
+      "center_wavelength_nm": 965.0
+    }
+  }
+}
