@@ -460,6 +460,41 @@ image-using configuration, even though the margin over the other
 image-using arms is real but modest, and none of them is close to
 competitive with the trivial baseline.
 
+## Stage 3: targeted ablations against the Stage 2 winner (residual ResNet-50)
+
+Two ablations chosen (not the full menu of seven, per this project's
+established "two targeted ablations, not exhaustive, given real
+compute constraints" precedent from `final/mosaic-dataset`'s own Stage
+4): **class-weighted loss** (a real, clean win there: +8.61 pts
+balanced accuracy for plain ResNet-50) and **augmentation** (not yet
+tested anywhere in this branch). Not run, stated plainly, for the same
+real compute/time reason: LR schedule+warmup, label smoothing, early
+stopping, balanced sampling/focal loss, ViT-B fix attempts, temperature
+scaling — all implemented and available via `scripts/mosaic_train_cv.py`'s
+flags for a future run, just not exercised here.
+
+### Ablation 1 — class-weighted loss
+
+| fold | n_test | accuracy | balanced accuracy | macro-F1 | ECE |
+|---|---|---|---|---|---|
+| 0 | 292 | 0.3938 | 0.4888 | 0.3987 | 0.1415 |
+| 1 | 307 | 0.6710 | 0.5784 | 0.5160 | 0.0947 |
+| 2 | 304 | 0.6743 | 0.5865 | 0.5733 | 0.1243 |
+| 3 | 295 | 0.6034 | 0.5588 | 0.5464 | 0.0584 |
+| 4 | 296 | 0.6216 | 0.6057 | 0.5846 | 0.0683 |
+| **mean ± std** | | 0.5928 ± 0.1032 | **0.5637 ± 0.0403** | 0.5238 ± 0.0669 | 0.0974 ± 0.0318 |
+
+**Real, clean ablation win** — the best result of this entire branch so
+far: 0.5637 vs. the residual baseline's 0.4913 (+0.0724 points, well
+beyond either arm's own std), closing the gap to the CV trivial
+baseline to −0.2146 (from −0.2870). Consistent with
+`final/mosaic-dataset`'s own finding that class-weighting helps this
+dataset's real class imbalance (`band1_mid` underrepresented by the
+tiling's majority-vote labeling), replicated here under a completely
+different (CV, not single-split) protocol and a different base
+architecture (residual, not plain ResNet-50) — a real, robust finding,
+not a one-off.
+
 ## Stage 4 (optional task variant, run early for convenience): 2-class trivial baseline
 
 Reported separately from every 3-class number in this log, per this
