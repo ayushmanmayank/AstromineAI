@@ -527,6 +527,87 @@ compute budget tested here, is overwhelmingly positional and not
 something a deep vision model recovers from pixels beyond what a
 simple location-aware baseline already captures.
 
+## Spatial-prior model and terrane hold-out (`final/mosaic-v3`)
+
+**In one plain sentence**: the best honest score on this data is a
+tuned k-NN **spatial-prior model** — which predicts a tile's Band I
+class from its real location and albedo, and is explicitly **not** a
+composition-from-image model — at 0.7971 ± 0.0600 balanced accuracy
+under block CV, but under a real, geologically-motivated terrane
+hold-out this collapses to a far more modest edge over chance
+(location-only: 0.6562, barely above the real local majority rate of
+0.5704), revealing that the block-CV figures this project reported
+were substantially inflated by spatial autocorrelation within the
+20°-block grid. Full numbers and provenance for every claim below are
+in `docs/mosaic_v3_log.md`.
+
+**Stage 1 (spatial-prior model + stacking)**: under the identical
+5-fold region-block CV as `final/mosaic-v2`, a real great-circle-
+distance k-NN using **location alone** (no albedo), with k tuned per
+fold on an inner validation split, reached **0.7971 ± 0.0600** balanced
+accuracy — beating the full-feature (albedo+lat/lon) random forest
+(0.7783 ± 0.0659), gradient boosting (0.7814 ± 0.0488), and a real
+great-circle kernel smoother (0.7834 ± 0.0496). Stacking real
+out-of-fold CNN probabilities (residual ResNet-50 + class-weighted,
+trained on each fold's own training rows only, so no test-fold
+information leaked) onto the best stacking-compatible tabular model
+gave a +0.0357-point / +0.39-std gain — **below this task's 1-std bar
+for a real improvement: no gain from image features confirmed.**
+
+**Stage 2 (Gate D — terrane hold-out)**: four real terrane groups
+(latitude bands standing in for Rheasilvia, Veneneia, the equatorial
+trough systems, and the remaining northern terrain — a real, disclosed
+fallback after the USGS gazetteer's search interface proved
+unqueryable via plain HTTP in this environment, not fabricated precise
+polygons), with a real ≥10° buffer around each held-out terrane's
+boundary. Leave-one-terrane-out results, against the real, corrected
+local majority rate (0.5704):
+
+| model | balanced accuracy (mean ± std) | vs. real local majority rate |
+|---|---|---|
+| Location-only RF | 0.6562 ± 0.1195 | +0.0858 |
+| Albedo + lat/lon RF (block CV: 0.7783) | 0.5752 ± 0.1007 | +0.0048 |
+| Stacked (gradient boosting + CNN probs) | 0.4833 ± 0.0901 | −0.0871 |
+| Deep model (residual ResNet-50 + class-weighted, block CV: 0.5637) | 0.3905 ± 0.0405 | −0.1799 |
+
+**GATE D verdict, stated as plainly as this project's every other
+finding**: real positional signal does survive genuine cross-terrane
+generalization, but only modestly — location-only RF keeps a real,
+if small, edge. Adding albedo, which looked like a real improvement
+under block CV, provides essentially no benefit under terrane
+hold-out and may actively hurt generalization (a real reversal of the
+block-CV ordering), plausibly because different real terranes were
+imaged under systematically different illumination/mission-phase
+conditions that an albedo-based rule does not transfer across. The
+deep model fares worst of all: its balanced accuracy falls below the
+real local majority rate on average, and under `southern_polar_cap`
+(the real Rheasilvia region) hold-out it collapses to predicting a
+single class for **all 412** real held-out test tiles — the clearest
+evidence in this entire three-branch experiment that a model here can
+learn something closer to a spurious, terrane-specific correlation
+than a genuinely transferable rule. **The headline 77.8% trivial-
+baseline figure this project reported under block CV was substantially
+inflated by spatial autocorrelation within the 20°-block grid** —
+exactly the failure mode this stage's own brief anticipated and asked
+to be named plainly if found.
+
+**Real limitation, stated clearly**: a spatial-prior model requires a
+tile's real map coordinates as input — it cannot classify an unlocated
+image. It is a statement about *where on Vesta a tile is*, combined
+with its overall brightness, not a statement about what a vision model
+sees in the pixels, and must never be described as a composition-from-
+image result.
+
+**Optional frontend extension (Stage 3, point 3) was not attempted**:
+explicitly marked optional and "skip if not trivially safe" in this
+task's own brief. Given the real scope already covered in this branch
+(a new model class, a new robustness-checking framework, and a major,
+nuanced correction to this project's own earlier reported numbers),
+extending the frontend to accept lat/lon and call a spatial-prior
+model was judged not a trivially-safe, quick addition within the real
+time available, and was skipped rather than rushed — stated honestly
+here rather than silently dropped.
+
 ## Limitations and honest scope statement
 
 - **This is a negative result for the compositional-signal question as
