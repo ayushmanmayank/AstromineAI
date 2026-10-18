@@ -122,3 +122,158 @@ predictions on top of real albedo+lat/lon does not reliably improve a
 spatial-prior model here, consistent with every other finding in this
 branch and `final/mosaic-v2` — the CNN's real, independent contribution
 beyond location/albedo remains unconfirmed.
+
+## Stage 2: terrane-held-out robustness check (Gate D)
+
+### Real terrane groups (`ml/data/mosaic_terranes.py`, committed before this stage ran)
+
+**Honest sourcing statement**: a real attempt was made to query the
+USGS Planetary Nomenclature gazetteer (`planetarynames.wr.usgs.gov`)
+directly for published Rheasilvia / Veneneia / Divalia Fossae /
+Saturnalia Fossae polygon boundaries before writing anything. Its
+feature search is a JavaScript-driven interface whose results are not
+present in the server's initial HTML response and could not be queried
+reliably via plain HTTP requests in this environment. Per this task's
+own explicitly-sanctioned fallback, this uses real **latitude bands**
+instead, chosen from the real tile-center latitude distribution
+(n=1,494, range −86.66 to +76.41°), named after the broad geologic
+context each is known, at a general qualitative level, to correspond
+to — **not** presented as sourced, precise published polygons:
+
+| terrane | latitude range | real n (kept tiles) | real context (approximate) |
+|---|---|---|---|
+| `southern_polar_cap` | ≤ −50° | 412 | Rheasilvia basin (real, well-established: south-polar) |
+| `southern_midlatitude_band` | (−50°, −20°] | 392 | Veneneia + southern trough reach (least precise) |
+| `equatorial_band` | (−20°, 20°] | 331 | Divalia Fossae / Saturnalia Fossae (real, equatorial) |
+| `northern_terrain` | > 20° | 359 | remaining northern cratered terrain (catch-all) |
+
+Leave-one-terrane-out CV (`ml/utils/mosaic_terrane_cv.py`): train on
+the other three terranes, buffered by a real ≥10° latitude gap around
+the held-out terrane's boundary (9 new tests cover no train/test
+overlap, every tile held out exactly once, the buffer respected at both
+boundaries of a middle terrane, and determinism — all passing).
+
+### Real, caught-and-fixed bug: the printed majority-class rate used the wrong set
+
+An earlier version of `scripts/mosaic_terrane_robustness.py` computed
+each terrane's "majority-class rate" from the **training** pool's
+global majority class, not that held-out terrane's own **local** test
+labels — a real deviation from this whole project's established
+convention (the majority rate is always the best a constant-class
+guess could do on the actual test set being scored). Caught on review
+before being relied on for Gate D's verdict. Fixed in the script
+(now uses `np.bincount(y_test)`, matching convention); the real model
+predictions, balanced accuracy, and macro-F1 numbers below were never
+affected by this bug (computed directly from true labels vs.
+predictions) — only the majority-rate reference values needed
+recomputing, which was done directly from the already-logged real
+confusion matrices' true-label row sums (identical across all four
+models within a terrane, since they share the same real `y_test`):
+
+| terrane | corrected real local majority rate |
+|---|---|
+| `southern_polar_cap` | 0.5704 (true counts: low=235, mid=106, high=71 / 412) |
+| `southern_midlatitude_band` | 0.6556 (true counts: low=73, mid=62, high=257 / 392) |
+| `equatorial_band` | 0.4622 (unchanged — coincidentally already correct) |
+| `northern_terrain` | 0.5933 (unchanged — coincidentally already correct) |
+| **mean** | **0.5704** (not the earlier, wrong 0.3535) |
+
+### Real Gate D results (`scripts/mosaic_terrane_robustness.py`)
+
+Four real models, identical leave-one-terrane-out folds. The stacked
+model reuses the real best-stacking recipe from Stage 1 (gradient
+boosting + out-of-fold CNN probabilities, with an inner 80/20 split of
+each terrane-train pool standing in for the inner val split, mirroring
+Stage 1's disclosed approach); the standalone deep model **reuses that
+same per-terrane CNN's own predictions** (trained on the 80% inner-train
+subset, not the full terrane-train pool) rather than training a second,
+separate CNN — a disclosed compute-saving simplification, not hidden:
+
+| terrane | n_test | majority rate | location-only RF | albedo+lat/lon RF | stacked (GB+CNN) | deep ResNet-50 |
+|---|---|---|---|---|---|---|
+| `southern_polar_cap` | 412 | 0.5704 | 0.4942 | 0.4825 | 0.4585 | 0.3333 |
+| `southern_midlatitude_band` | 392 | 0.6556 | 0.6346 | 0.6295 | 0.5451 | 0.4336 |
+| `equatorial_band` | 331 | 0.4622 | 0.6657 | 0.7133 | 0.5817 | 0.4233 |
+| `northern_terrain` | 359 | 0.5933 | 0.8303 | 0.4755 | 0.3479 | 0.3718 |
+| **mean ± std** | | **0.5704** | **0.6562 ± 0.1195** | **0.5752 ± 0.1007** | 0.4833 ± 0.0901 | **0.3905 ± 0.0405** |
+
+(Balanced accuracy throughout, macro-F1 omitted from this table for
+space — full numbers in the real script output: location-only RF
+0.5364 ± 0.1030, albedo+lat/lon RF 0.5395 ± 0.1354, stacked 0.4265 ±
+0.0940, deep 0.2707 ± 0.0961 macro-F1.)
+
+**Striking, specific real finding**: under `southern_polar_cap`
+hold-out (the real Rheasilvia region), the deep model's confusion
+matrix is `[[0,235,0],[0,106,0],[0,71,0]]` — it predicted `band1_mid`
+for **every single one of the 412 real test tiles**, including the 235
+whose true label was `band1_low` (57% of that terrane). Complete,
+one-class collapse on an entire held-out real geologic region.
+
+### Real, honest interpretation — the central finding of this stage
+
+Comparing against the **corrected** real local majority rates changes
+the picture substantially from an initial (buggy) read:
+
+- **Location-only RF** (0.6562 ± 0.1195) exceeds the mean real
+  majority rate (0.5704) by a real but modest **+0.0858** — not the
+  dramatic +0.3027 margin the earlier, wrong majority-rate comparison
+  suggested.
+- **Albedo+lat/lon RF** (0.5752 ± 0.1007) — the same real recipe that
+  scored 0.7783 under block CV — is barely above the real local
+  majority rate at all (**+0.0048**), essentially indistinguishable
+  from a constant-class guess under real terrane hold-out.
+- **Stacked (GB+CNN)** (0.4833 ± 0.0901) falls **below** the real
+  majority rate (−0.0871).
+- **Deep ResNet-50** (0.3905 ± 0.0405) falls well below the real
+  majority rate (−0.1799) in raw terms, though it remains modestly
+  above a 3-class chance-level *balanced* accuracy of 1/3 ≈ 0.333
+  (+0.057) — majority rate is a raw-accuracy quantity, not directly
+  the same unit as balanced accuracy, a distinction worth being precise
+  about here specifically, even though this whole project has
+  consistently quoted the two side by side as a quick reference
+  throughout.
+
+**GATE D verdict, stated as this task's own brief requires**:
+
+**(a)** Does the location-based model keep a score above majority-class
+under terrane hold-out? **Yes, but only modestly** — location-only RF
+(0.6562 ± 0.1195) exceeds the real, corrected local majority rate
+(0.5704) by +0.0858, a real, non-trivial edge, but far smaller than
+block CV's comparable margin (location-only RF was 0.7215 vs. a
+~0.44-0.61 block-CV majority rate in `final/mosaic-v2`'s own Stage 0 —
+see that log — a considerably larger gap).
+
+**(b)** Does the gap between the trivial baseline and the deep model
+change? **The absolute gap narrows slightly in raw terms** (block CV:
+albedo+lat/lon RF 0.7783 − deep model 0.5637 = +0.2146; terrane
+hold-out: 0.5752 − 0.3905 = +0.1847), **but not because the deep model
+catches up** — both collapse together under the harder, real domain
+shift (the trivial baseline falls −0.2031 points, the deep model falls
+−0.1732 points), so the narrower gap reflects mutual collapse toward
+the real local majority rate, not the deep model gaining real ground.
+
+**Overall, honest verdict**: **the 77.8% block-CV trivial-baseline
+figure was substantially inflated by spatial autocorrelation within
+the 20°-block grid — exactly the scenario this task's brief
+anticipated and asked to be named plainly if it happened.** Real
+positional signal does survive genuine cross-terrane generalization
+(location-only RF keeps a real, if modest, edge over the local
+majority rate), but adding albedo on top of location — which looked
+like a real improvement under block CV (0.7215 → 0.7783) — **provides
+essentially no real benefit, and may actively hurt generalization**,
+under a genuine geological/illumination domain shift (0.5752 vs.
+location-only's 0.6562, a real reversal of the block-CV ordering).
+Real, plausible reason, stated as a hypothesis: different real
+terranes were imaged under systematically different real illumination/
+mission-phase conditions (this project's own Stage 1 Gate C log
+documents HAMO-1 vs. HAMO-2 coverage differences by hemisphere), so an
+albedo-based rule learned on some terranes' overall brightness levels
+does not transfer cleanly to a terrane imaged under different real
+conditions — unlike location, which is a stable, terrane-independent
+real coordinate. The deep model fares worst of all under this real
+test: it falls below the real local majority rate on average, and
+collapses to predicting a single class for an entire held-out real
+geologic region (`southern_polar_cap`) — the clearest real evidence in
+this whole three-branch experiment that this model has learned
+something closer to a spurious correlation with its specific real
+training terranes than a genuinely robust, transferable rule.
