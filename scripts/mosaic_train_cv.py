@@ -315,6 +315,11 @@ def run_fold(args, train_rows, val_rows, test_rows, device, seed):
         test_metrics["ece_temp_scaled"] = expected_calibration_error(scaled_conf, correct)
         test_metrics["temperature"] = T
 
+    if getattr(args, "checkpoint_out", None):
+        Path(args.checkpoint_out).parent.mkdir(parents=True, exist_ok=True)
+        torch.save(model.state_dict(), args.checkpoint_out)
+        logger.info("Saved checkpoint to %s", args.checkpoint_out)
+
     return test_metrics
 
 
@@ -359,6 +364,14 @@ def main(argv=None) -> int:
     parser.add_argument("--seed", type=int, default=SEED)
     parser.add_argument("--manifest", default=MANIFEST_PATH)
     parser.add_argument("--tag", default="run")
+    parser.add_argument("--checkpoint-out", default=None,
+                         help="If set with --single-fold, saves that one fold's trained model "
+                              "state_dict here (for Stage 5's explainability -- CV trains a fresh "
+                              "model per fold, so there is no single 'the' model otherwise).")
+    parser.add_argument("--single-fold", type=int, default=None,
+                         help="If set, trains/evaluates only this one fold index (0-based) instead "
+                              "of the full CV loop -- used to produce one real, savable checkpoint "
+                              "for Stage 5's explainability, not for CV metrics (which need all folds).")
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
 
@@ -390,6 +403,11 @@ def main(argv=None) -> int:
           f"lr_warmup={args.lr_warmup} balanced_sampling={args.balanced_sampling} focal_loss={args.focal_loss} "
           f"vit_lr={args.vit_lr} vit_layerwise_lr_decay={args.vit_layerwise_lr_decay} "
           f"temperature_scaling={args.temperature_scaling}")
+
+    if args.single_fold is not None:
+        folds = [f for f in folds if f.fold_index == args.single_fold]
+        if not folds:
+            raise ValueError(f"--single-fold {args.single_fold} is out of range (0..{args.n_folds - 1})")
 
     bal_accs, f1s, accs, eces = [], [], [], []
     for fold in folds:
