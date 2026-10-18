@@ -585,3 +585,61 @@ anything it falls further behind in relative terms. This is reported
 as a separate task's result, per this stage's own rule, and is not
 mixed with the 3-class numbers anywhere in this log or the final
 report.
+
+## Stage 5: explainability + final report
+
+### Checkpoint
+
+One real checkpoint trained for explainability, since 5-fold CV trains
+a fresh model per fold by design (no single "the" model otherwise):
+this branch's winning real 3-class configuration (residual ResNet-50 +
+class-weighted loss), trained on fold 0's real train+val tiles only
+(`scripts/mosaic_train_cv.py --single-fold 0 --checkpoint-out
+trained_models/mosaic_v2/residual_resnet50_classweighted_fold0.pt`).
+That fold's own real test-fold metrics (not the CV mean — a single
+fold's number, reported for transparency, not as this branch's headline
+result): accuracy=0.3938, balanced_accuracy=0.4888, macro_f1=0.3987,
+confusion matrix `[[41,27,74],[6,41,1],[12,57,33]]`.
+
+### Grad-CAM on 12 real test tiles, stratified by true class (4 per class)
+
+Reused `ml/explainability/gradcam.py`'s `generate_gradcam()`
+unmodified (same as `final/mosaic-dataset`'s own Stage 5). Only
+Grad-CAM, not attention rollout: this branch's winning configuration is
+ResNet-50-based (the residual variant), not ViT-B, so attention
+rollout does not apply to the real model being explained here — stated
+plainly rather than run on an architecture that was not this branch's
+real winner. 12 real tiles drawn from fold 0's real, held-out test set
+(never used in that checkpoint's training), 4 per true class:
+`band1_low` (tiles 00053, 00097, 00098, 00099), `band1_mid` (00102,
+00786, 00991, 00992), `band1_high` (00046, 00047, 00054, 00081).
+Images: `docs/handoff/artifacts/mosaic_v2_explainability/`. Real
+predictions on these 12 (4/12 = 33.3% correct on this small stratified
+sample): `band1_low` 2/4 correct (00098, 00099; 00053 and 00097
+predicted `band1_high`), `band1_mid` 1/4 correct (00786; the other 3
+predicted `band1_low`), `band1_high` 1/4 correct (00046; the other 3
+predicted `band1_low`) — roughly consistent with this fold's own real
+test-set accuracy (0.3938), allowing for the small, non-representative
+12-tile sample.
+
+**Honest visual assessment**: across all 12 tiles, the Grad-CAM heatmaps
+are coarse, low-resolution, blocky patterns (ResNet-50's `layer4`
+feature map is only 7×7 for a 224×224 input, upsampled by nearly 32×
+to produce the final heatmap) that look **structurally similar across
+tiles with very different real content** — a recurring vertical
+bright band flanked by darker corners, present whether the tile shows a
+sharp crater rim, smooth undifferentiated terrain, or mottled
+small-scale texture, and regardless of the tile's true class or whether
+the prediction was correct. This is a real, honest, negative finding
+for interpretability: the highlighted regions do not look like they
+track specific, content-dependent compositional or even albedo/shading
+features the way `final/mosaic-dataset`'s own Stage 5 Grad-CAM maps did
+(those consistently tracked a real, visible brightness ridge in each
+tile). It is consistent with, and strengthens, Stage 2(b)'s own
+hypothesis: this residual model's real predictive power comes
+overwhelmingly from its side-input branch (the same real albedo+lat/lon
+features the trivial baseline uses), with the CNN branch contributing a
+comparatively weak, largely content-independent signal — exactly what
+a near-identical heatmap across very different real tiles would look
+like if the convolutional branch's gradient contribution to the final
+decision were small relative to the side-input branch's.
